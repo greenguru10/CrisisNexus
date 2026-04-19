@@ -44,6 +44,7 @@ class VolunteerCreate(BaseModel):
 class AdminVolunteerCreate(BaseModel):
     """Schema for admin creating a volunteer with just email and skills."""
     email: str = Field(..., description="Volunteer email for login and notifications")
+    mobile_number: Optional[str] = Field(None, description="Mobile number for WhatsApp (e.g. +919876543210)")
     skills: List[str] = Field(..., min_length=1)
 
 class VolunteerUpdate(BaseModel):

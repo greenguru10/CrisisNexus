@@ -13,6 +13,7 @@ const Volunteers = () => {
 
   // Forms
   const [newVolEmail, setNewVolEmail] = useState('');
+  const [newVolMobile, setNewVolMobile] = useState('');
   const [newVolSkills, setNewVolSkills] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -36,9 +37,10 @@ const Volunteers = () => {
     setSaving(true);
     try {
       const skillsArray = newVolSkills.split(',').map(s => s.trim()).filter(s => s);
-      await api.post('/api/volunteer', { email: newVolEmail, skills: skillsArray });
+      await api.post('/api/volunteer', { email: newVolEmail, mobile_number: newVolMobile, skills: skillsArray });
       setCreateModalOpen(false);
       setNewVolEmail('');
+      setNewVolMobile('');
       setNewVolSkills('');
       fetchVolunteers();
     } catch (err) {
@@ -183,6 +185,10 @@ const Volunteers = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                 <input type="email" required value={newVolEmail} onChange={e => setNewVolEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
+                <input type="tel" placeholder="+1234567890" value={newVolMobile} onChange={e => setNewVolMobile(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Skills (comma separated)</label>

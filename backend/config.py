@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str
     TWILIO_AUTH_TOKEN: str
     TWILIO_PHONE: str
+    TWILIO_JOIN_CODE: str = "store-creature"
 
     @property
     def cors_origins_list(self) -> List[str]:

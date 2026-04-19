@@ -97,7 +97,7 @@ from fastapi import BackgroundTasks
 import secrets
 from services.auth_service import hash_password
 from models.user import UserRole
-from services.email_service import send_admin_created_volunteer_email
+from services.email_service import send_admin_created_volunteer_email, send_onboarding_email
 from schemas.volunteer_schema import AdminVolunteerCreate
 
 @router.post("/volunteer", response_model=VolunteerResponse, status_code=201)
@@ -110,6 +110,7 @@ def admin_create_volunteer(
     """
     **[ADMIN ONLY]** Create a new volunteer with email and skills.
     Generates a secure password and emails the volunteer.
+    Also sends WhatsApp onboarding instructions.
     """
     # 1. Check if email exists
     existing = db.query(User).filter(User.email == payload.email).first()
@@ -133,6 +134,7 @@ def admin_create_volunteer(
     volunteer = Volunteer(
         name=payload.email.split('@')[0], # Generic name initially
         email=payload.email,
+        mobile_number=payload.mobile_number,
         skills=payload.skills,
         availability=True,
     )
@@ -142,8 +144,11 @@ def admin_create_volunteer(
 
     logger.info("Admin %s created volunteer %s", current_user.email, volunteer.email)
 
-    # 5. Send Welcome Email
+    # 5. Send Welcome Email (with temp password)
     background_tasks.add_task(send_admin_created_volunteer_email, volunteer.email, temp_password)
+
+    # 6. Send WhatsApp Onboarding Email (with join instructions)
+    background_tasks.add_task(send_onboarding_email, volunteer.name, volunteer.email)
 
     return volunteer
 
@@ -197,6 +202,12 @@ def delete_volunteer(
     volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
     if not volunteer:
         raise HTTPException(status_code=404, detail=f"Volunteer with id {volunteer_id} not found")
+
+    # Also delete their login account (User table) so the email is freed up
+    if volunteer.email:
+        user_record = db.query(User).filter(User.email == volunteer.email).first()
+        if user_record:
+            db.delete(user_record)
 
     db.delete(volunteer)
     db.commit()

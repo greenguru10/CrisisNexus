@@ -162,3 +162,38 @@ async def send_admin_created_volunteer_email(email: str, temp_password: str) -> 
     </html>
     """
     return await send_email(email, subject, body)
+
+
+async def send_onboarding_email(name: str, email: str) -> bool:
+    """Send WhatsApp onboarding instructions when a new volunteer is created."""
+    # Pull dynamic values from config
+    twilio_phone = settings.TWILIO_PHONE.replace("whatsapp:", "")
+    join_code = settings.TWILIO_JOIN_CODE
+
+    subject = "📲 Activate WhatsApp Alerts – CommunitySync"
+    body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2 style="color: #2563eb;">Hello {name},</h2>
+        <p>You have been successfully registered as a volunteer on <strong>CommunitySync</strong>.</p>
+
+        <p>To receive <strong>real-time task updates via WhatsApp</strong>, please follow these steps:</p>
+
+        <div style="background: #f0f9ff; border-left: 4px solid #2563eb; padding: 16px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0 0 8px 0;"><strong>Step 1:</strong> Open WhatsApp on your phone</p>
+            <p style="margin: 0 0 8px 0;"><strong>Step 2:</strong> Send the following message:</p>
+            <p style="margin: 0 0 8px 0; padding: 8px 16px; background: #dbeafe; border-radius: 4px; font-family: monospace; font-size: 16px; display: inline-block;">
+                join {join_code}
+            </p>
+            <p style="margin: 8px 0 0 0;"><strong>Step 3:</strong> Send it to: <code style="font-size: 15px; background: #dbeafe; padding: 2px 8px; border-radius: 4px;">{twilio_phone}</code></p>
+        </div>
+
+        <p>Once completed, you will start receiving task notifications instantly. ✅</p>
+        <p style="color: #6b7280; font-size: 13px;"><em>Note: This is a one-time setup. You only need to do this once.</em></p>
+
+        <br/>
+        <p>Thank you for your service!<br/>— <strong>CommunitySync Team</strong></p>
+    </body>
+    </html>
+    """
+    return await send_email(email, subject, body)
