@@ -9,12 +9,14 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isPending, setIsPending] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setIsPending(false);
     try {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', data.access_token);
@@ -22,7 +24,15 @@ const Login = () => {
       navigate('/dashboard');
       window.location.reload();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail || 'Login failed. Please check your credentials.';
+      
+      if (status === 403) {
+        setIsPending(true);
+        setError(detail);
+      } else {
+        setError(detail);
+      }
     } finally {
       setLoading(false);
     }
@@ -41,7 +51,12 @@ const Login = () => {
           </div>
 
           {error && (
-            <div className="mb-6 p-3 bg-red-50 border border-red-100 text-red-600 text-sm rounded-lg">
+            <div className={`mb-6 p-3 border text-sm rounded-lg ${
+              isPending 
+                ? 'bg-amber-50 border-amber-200 text-amber-700'
+                : 'bg-red-50 border-red-100 text-red-600'
+            }`}>
+              {isPending && <span className="font-medium">⏳ </span>}
               {error}
             </div>
           )}

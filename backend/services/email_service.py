@@ -197,3 +197,37 @@ async def send_onboarding_email(name: str, email: str) -> bool:
     </html>
     """
     return await send_email(email, subject, body)
+
+
+async def send_volunteer_welcome_email(name: str, email: str) -> bool:
+    """
+    Send welcome email after a volunteer's account is approved by admin.
+    This is different from the generic registration welcome — it confirms
+    that the volunteer is now active and will start receiving tasks.
+    """
+    subject = "Welcome to CommunitySync"
+    body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2 style="color: #2563eb;">Hello {name},</h2>
+        <p>Welcome to <strong>CommunitySync</strong>!</p>
+        <p>You are now an <strong>active volunteer</strong> and will start receiving tasks.</p>
+
+        <div style="background: #f0fdf4; border-left: 4px solid #22c55e; padding: 16px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0;">Your account has been reviewed and approved. You can now log in and access the platform.</p>
+        </div>
+
+        <p>
+            <a href="http://localhost:3000/login"
+               style="display:inline-block; padding:10px 20px; background-color:#2563eb; color:white; text-decoration:none; border-radius:5px;">
+                Log In Now
+            </a>
+        </p>
+
+        <br/>
+        <p>Thank you for your service!<br/>— <strong>CommunitySync Team</strong></p>
+    </body>
+    </html>
+    """
+    return await send_email(email, subject, body)
+

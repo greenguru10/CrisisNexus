@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api';
-import { Mail, Lock, Phone, MapPin, CheckCircle, AlertTriangle, Save, Eye, EyeOff, Shield, Edit3 } from 'lucide-react';
+import { Mail, Lock, Phone, MapPin, CheckCircle, AlertTriangle, Save, Eye, EyeOff, Shield, Edit3, Star } from 'lucide-react';
 
 const roleConfig = {
   admin: { label: 'Administrator', color: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500' },
@@ -36,7 +36,7 @@ const Profile = () => {
   const role = localStorage.getItem('role') || 'volunteer';
   const rc = roleConfig[role] || roleConfig.volunteer;
 
-  const [profile, setProfile] = useState({ email: '', mobile_number: '', location: '' });
+  const [profile, setProfile] = useState({ email: '', mobile_number: '', location: '', skills: '' });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -55,6 +55,7 @@ const Profile = () => {
           email: data.email || '',
           mobile_number: data.mobile_number || '',
           location: data.location || '',
+          skills: data.skills ? data.skills.join(', ') : '',
         });
       } catch (err) {
         console.error('Failed to fetch profile', err);
@@ -76,6 +77,9 @@ const Profile = () => {
         mobile_number: profile.mobile_number,
         location: profile.location,
       };
+      if (role === 'volunteer') {
+        updateData.skills = profile.skills.split(',').map(s => s.trim()).filter(Boolean);
+      }
       if (password) updateData.password = password;
       await api.put('/auth/me', updateData);
       setSuccess(true);
@@ -193,6 +197,16 @@ const Profile = () => {
               placeholder="Mumbai, India"
             />
           </div>
+
+          {role === 'volunteer' && (
+            <InputField
+              icon={Star}
+              label="Skills (comma separated)"
+              value={profile.skills}
+              onChange={(e) => setProfile(p => ({ ...p, skills: e.target.value }))}
+              placeholder="e.g. medical, language translation, logistics"
+            />
+          )}
         </div>
 
         {/* Password card */}

@@ -15,6 +15,13 @@ class UserRole(str, enum.Enum):
     NGO = "ngo"
 
 
+class AccountStatus(str, enum.Enum):
+    """Account approval status for volunteer onboarding workflow."""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class User(Base):
     """ORM model for the users table."""
 
@@ -26,6 +33,11 @@ class User(Base):
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.VOLUNTEER, index=True)
     mobile_number = Column(String(20), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
+    account_status = Column(
+        SAEnum(AccountStatus, values_callable=lambda obj: [e.value for e in obj]), nullable=False,
+        default=AccountStatus.APPROVED, index=True,
+        comment="pending|approved|rejected — volunteers start as pending on self-signup",
+    )
     reset_token = Column(String(255), nullable=True, index=True)
     reset_token_expiry = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

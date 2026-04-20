@@ -74,6 +74,7 @@ class VolunteerBase(BaseModel):
     longitude: Optional[float] = None
     availability: bool
     rating: Optional[float] = None
+    account_status: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

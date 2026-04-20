@@ -3,7 +3,7 @@ Pydantic schemas for Authentication – register, login, token, user response.
 """
 
 from pydantic import BaseModel, Field, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from enum import Enum
 
@@ -21,6 +21,7 @@ class UserRegister(BaseModel):
     email: str = Field(..., description="User email address")
     password: str = Field(..., min_length=6, max_length=128, description="Password (min 6 chars)")
     role: UserRole = Field(UserRole.VOLUNTEER, description="User role: admin, volunteer, ngo")
+    skills: Optional[List[str]] = Field(default_factory=list, description="List of skills for volunteers")
 
     class Config:
         json_schema_extra = {
@@ -28,6 +29,7 @@ class UserRegister(BaseModel):
                 "email": "priya@example.com",
                 "password": "securepass123",
                 "role": "volunteer",
+                "skills": ["medical", "first_aid"]
             }
         }
 
@@ -53,6 +55,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str
+    account_status: Optional[str] = None
     message: str = "Login successful"
 
 
@@ -63,7 +66,9 @@ class UserResponse(BaseModel):
     role: UserRole
     mobile_number: Optional[str] = None
     location: Optional[str] = None
+    skills: Optional[List[str]] = None
     is_active: bool
+    account_status: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -75,6 +80,7 @@ class UserUpdateProfile(BaseModel):
     password: Optional[str] = None
     mobile_number: Optional[str] = None
     location: Optional[str] = None
+    skills: Optional[List[str]] = None
 
 class ForgotPasswordRequest(BaseModel):
     """Forgot password request payload."""

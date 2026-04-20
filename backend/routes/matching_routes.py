@@ -10,6 +10,7 @@ from sqlalchemy import func
 
 from database import get_db
 from models.need import Need, NeedStatus
+from models.user import User, AccountStatus
 from models.volunteer import Volunteer
 from schemas.volunteer_schema import MatchResult
 from services.matching_service import find_best_volunteer
@@ -54,10 +55,15 @@ def match_volunteer(
     if need.status == NeedStatus.COMPLETED:
         raise HTTPException(status_code=400, detail=f"Need {need_id} is already completed")
 
-    # Get all volunteers (since we changed matching logic to consider availability as a score rather than exclusion)
-    available_volunteers = db.query(Volunteer).all()
+    # Get only APPROVED volunteers (must have an approved User account)
+    available_volunteers = (
+        db.query(Volunteer)
+        .join(User, User.email == Volunteer.email)
+        .filter(User.account_status == AccountStatus.APPROVED)
+        .all()
+    )
     if not available_volunteers:
-        raise HTTPException(status_code=404, detail="No volunteers registered in system")
+        raise HTTPException(status_code=404, detail="No approved volunteers available in system")
 
     # Fetch workload for passing to matching logic
     active_needs = db.query(Need.assigned_volunteer_id, func.count(Need.id)).filter(
@@ -141,6 +147,14 @@ def manual_match_volunteer(
     volunteer = db.query(Volunteer).filter(Volunteer.id == payload.volunteer_id).first()
     if not volunteer:
         raise HTTPException(status_code=404, detail="Volunteer not found")
+
+    # Verify volunteer is approved before assignment
+    vol_user = db.query(User).filter(User.email == volunteer.email).first()
+    if not vol_user or vol_user.account_status != AccountStatus.APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot assign task: volunteer account is not approved",
+        )
         
     need.status = NeedStatus.ASSIGNED
     need.assigned_volunteer_id = volunteer.id

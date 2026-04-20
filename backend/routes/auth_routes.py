@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.user import User, UserRole
+from models.user import User, UserRole, AccountStatus
+from models.volunteer import Volunteer
 from schemas import auth_schema
 from schemas.auth_schema import UserRegister, UserLogin, TokenResponse, UserResponse
 from services.auth_service import (
@@ -16,7 +17,6 @@ from services.auth_service import (
     authenticate_user,
     get_user_by_email,
 )
-from services.email_service import send_welcome_email
 from dependencies.auth_dependency import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,10 @@ async def register(
 ):
     """
     Register a new user.
+
+    When role is 'volunteer':
+    - Creates a corresponding volunteer profile (linked by email)
+    - Sets account_status to 'pending' (requires admin approval before login)
 
     **Sample request:**
     ```json
@@ -49,21 +53,48 @@ async def register(
             detail="Email already registered",
         )
 
+    # Determine account_status based on role
+    # Volunteers start as 'pending', admins/NGOs are approved immediately
+    if payload.role == UserRole.VOLUNTEER:
+        initial_status = AccountStatus.PENDING
+    else:
+        initial_status = AccountStatus.APPROVED
+
     # Create user
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
         role=UserRole(payload.role.value),
         is_active=True,
+        account_status=initial_status,
     )
     db.add(user)
+    db.flush()  # Get user.id before creating volunteer
+
+    # If volunteer, also create volunteer profile entry
+    if payload.role == UserRole.VOLUNTEER:
+        volunteer = Volunteer(
+            name=payload.email.split('@')[0],
+            email=payload.email,
+            skills=payload.skills or [],
+            availability=True,
+        )
+        db.add(volunteer)
+
     db.commit()
     db.refresh(user)
 
-    logger.info("Registered user id=%d email=%s role=%s", user.id, user.email, user.role.value)
+    logger.info(
+        "Registered user id=%d email=%s role=%s account_status=%s",
+        user.id, user.email, user.role.value, user.account_status.value,
+    )
 
-    # Send welcome email in background
-    background_tasks.add_task(send_welcome_email, user.email, user.role.value)
+    # NOTE: Welcome email is NOT sent here for volunteers.
+    # It will be sent upon admin approval.
+    # For non-volunteer roles, send welcome email immediately.
+    if payload.role != UserRole.VOLUNTEER:
+        from services.email_service import send_welcome_email
+        background_tasks.add_task(send_welcome_email, user.email, user.role.value)
 
     return user
 
@@ -72,6 +103,8 @@ async def register(
 def login(payload: UserLogin, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT token.
+
+    Volunteers with account_status != 'approved' will be rejected with 403.
 
     **Sample request:**
     ```json
@@ -87,6 +120,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
         "access_token": "eyJhbGciOiJIUzI1NiIs...",
         "token_type": "bearer",
         "role": "volunteer",
+        "account_status": "approved",
         "message": "Login successful"
     }
     ```
@@ -99,6 +133,17 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Gate: block unapproved volunteers
+    if user.role == UserRole.VOLUNTEER and user.account_status != AccountStatus.APPROVED:
+        status_messages = {
+            AccountStatus.PENDING: "Account pending approval",
+            AccountStatus.REJECTED: "Account has been rejected",
+        }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=status_messages.get(user.account_status, "Account not approved"),
+        )
+
     access_token = create_access_token(
         data={"sub": user.email, "role": user.role.value}
     )
@@ -108,10 +153,9 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     return TokenResponse(
         access_token=access_token,
         role=user.role.value,
+        account_status=user.account_status.value,
     )
 
-
-from models.volunteer import Volunteer
 
 @router.get("/me", response_model=UserResponse)
 def get_me(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -122,6 +166,7 @@ def get_me(db: Session = Depends(get_db), current_user: User = Depends(get_curre
     volunteer = db.query(Volunteer).filter(Volunteer.email == current_user.email).first()
     if volunteer:
         user_resp.location = volunteer.location
+        user_resp.skills = volunteer.skills
         if not user_resp.mobile_number and volunteer.mobile_number:
             user_resp.mobile_number = volunteer.mobile_number
     return user_resp
@@ -152,6 +197,8 @@ def update_me(
             volunteer.mobile_number = payload.mobile_number
     if payload.location is not None and volunteer:
         volunteer.location = payload.location
+    if payload.skills is not None and volunteer:
+        volunteer.skills = payload.skills
 
     db.commit()
     db.refresh(current_user)

@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api';
-import { Search, MapPin, Phone, Mail, Star, CheckCircle, XCircle, Plus, Trash, X } from 'lucide-react';
+import { Search, MapPin, Phone, Mail, Star, CheckCircle, XCircle, Plus, Trash, X, Clock, ShieldCheck, ShieldX, Users } from 'lucide-react';
 
 const Volunteers = () => {
   const [volunteers, setVolunteers] = useState([]);
+  const [pendingVolunteers, setPendingVolunteers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  
+  const [activeTab, setActiveTab] = useState('approved'); // 'approved' | 'pending'
+
   const role = localStorage.getItem('role');
   const isAdmin = role === 'admin';
 
@@ -17,8 +19,13 @@ const Volunteers = () => {
   const [newVolSkills, setNewVolSkills] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Action loading states
+  const [approvingId, setApprovingId] = useState(null);
+  const [rejectingId, setRejectingId] = useState(null);
+
   useEffect(() => {
     fetchVolunteers();
+    if (isAdmin) fetchPending();
   }, []);
 
   const fetchVolunteers = async () => {
@@ -29,6 +36,15 @@ const Volunteers = () => {
       console.error('Failed to fetch volunteers:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPending = async () => {
+    try {
+      const { data } = await api.get('/api/volunteers/pending');
+      setPendingVolunteers(data);
+    } catch (err) {
+      console.error('Failed to fetch pending volunteers:', err);
     }
   };
 
@@ -55,12 +71,41 @@ const Volunteers = () => {
     try {
       await api.delete(`/api/volunteer/${id}`);
       fetchVolunteers();
+      fetchPending();
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to delete volunteer');
     }
   };
 
-  const filtered = volunteers.filter(v =>
+  const handleApprove = async (id) => {
+    setApprovingId(id);
+    try {
+      await api.post(`/api/volunteer/${id}/approve`);
+      // Move from pending to approved
+      fetchVolunteers();
+      fetchPending();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to approve volunteer');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleReject = async (id) => {
+    if (!window.confirm('Are you sure you want to reject this volunteer?')) return;
+    setRejectingId(id);
+    try {
+      await api.post(`/api/volunteer/${id}/reject`);
+      fetchPending();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to reject volunteer');
+    } finally {
+      setRejectingId(null);
+    }
+  };
+
+  const displayList = activeTab === 'approved' ? volunteers : pendingVolunteers;
+  const filtered = displayList.filter(v =>
     (v.name || '').toLowerCase().includes(filter.toLowerCase()) ||
     (v.location || '').toLowerCase().includes(filter.toLowerCase()) ||
     (v.skills || []).some(s => s.toLowerCase().includes(filter.toLowerCase()))
@@ -81,7 +126,7 @@ const Volunteers = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Volunteers</h1>
-          <p className="text-gray-500 text-sm">{volunteers.length} registered volunteers</p>
+          <p className="text-gray-500 text-sm">{volunteers.length} approved volunteers</p>
         </div>
         <div className="flex gap-3">
           <div className="relative">
@@ -104,15 +149,56 @@ const Volunteers = () => {
         </div>
       </div>
 
+      {/* TABS — Approved / Pending (Admin only) */}
+      {isAdmin && (
+        <div className="flex gap-2 border-b border-gray-200 pb-0">
+          <button
+            onClick={() => setActiveTab('approved')}
+            className={`flex items-center gap-2 px-4 py-2.5 font-medium text-sm rounded-t-lg transition-all border-b-2 ${
+              activeTab === 'approved'
+                ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Users size={16} />
+            Approved
+            <span className="ml-1 bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+              {volunteers.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('pending')}
+            className={`flex items-center gap-2 px-4 py-2.5 font-medium text-sm rounded-t-lg transition-all border-b-2 ${
+              activeTab === 'pending'
+                ? 'border-amber-500 text-amber-600 bg-amber-50/50'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Clock size={16} />
+            Pending Approval
+            {pendingVolunteers.length > 0 && (
+              <span className="ml-1 bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full animate-pulse">
+                {pendingVolunteers.length}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
-          <p className="text-lg">No volunteers found</p>
+          <p className="text-lg">
+            {activeTab === 'pending' ? 'No pending volunteers' : 'No volunteers found'}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map(vol => (
-            <div key={vol.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 relative hover:shadow-md transition-shadow group">
-              {isAdmin && (
+            <div key={vol.id} className={`bg-white rounded-xl border shadow-sm p-6 relative hover:shadow-md transition-shadow group ${
+              activeTab === 'pending' ? 'border-amber-200' : 'border-gray-100'
+            }`}>
+              {/* Delete button (admin, approved tab only) */}
+              {isAdmin && activeTab === 'approved' && (
                 <button 
                   onClick={() => handleDelete(vol.id)}
                   className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
@@ -120,22 +206,39 @@ const Volunteers = () => {
                   <Trash size={16} />
                 </button>
               )}
+
+              {/* Pending badge */}
+              {activeTab === 'pending' && (
+                <div className="absolute top-4 right-4">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded-full">
+                    <Clock size={12} /> Pending
+                  </span>
+                </div>
+              )}
               
               <div className="flex items-start justify-between mb-4 mt-2">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-lg">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg ${
+                    activeTab === 'pending' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'
+                  }`}>
                     {vol.name?.[0]?.toUpperCase() || '?'}
                   </div>
                   <div>
                     <h3 className="font-semibold text-gray-900">{vol.name}</h3>
                     <div className="flex items-center gap-1 mt-0.5">
-                      {vol.availability ? (
-                        <span className="flex items-center gap-1 text-xs text-green-600">
-                          <CheckCircle size={12} /> Available
-                        </span>
+                      {activeTab === 'approved' ? (
+                        vol.availability ? (
+                          <span className="flex items-center gap-1 text-xs text-green-600">
+                            <CheckCircle size={12} /> Available
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-red-500">
+                            <XCircle size={12} /> Unavailable
+                          </span>
+                        )
                       ) : (
-                        <span className="flex items-center gap-1 text-xs text-red-500">
-                          <XCircle size={12} /> Unavailable
+                        <span className="flex items-center gap-1 text-xs text-amber-500">
+                          <Clock size={12} /> Awaiting review
                         </span>
                       )}
                     </div>
@@ -158,13 +261,38 @@ const Volunteers = () => {
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 mb-4">
                 {(vol.skills || []).map((skill, i) => (
                   <span key={i} className="px-2.5 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full">
                     {skill}
                   </span>
                 ))}
+                {(!vol.skills || vol.skills.length === 0) && (
+                  <span className="text-xs text-gray-400 italic">No skills listed</span>
+                )}
               </div>
+
+              {/* Approve / Reject buttons (pending tab) */}
+              {isAdmin && activeTab === 'pending' && (
+                <div className="flex gap-2 pt-3 border-t border-gray-100">
+                  <button
+                    onClick={() => handleApprove(vol.id)}
+                    disabled={approvingId === vol.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50"
+                  >
+                    <ShieldCheck size={15} />
+                    {approvingId === vol.id ? 'Approving...' : 'Approve'}
+                  </button>
+                  <button
+                    onClick={() => handleReject(vol.id)}
+                    disabled={rejectingId === vol.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white text-red-600 text-sm font-medium rounded-lg border border-red-200 hover:bg-red-50 transition disabled:opacity-50"
+                  >
+                    <ShieldX size={15} />
+                    {rejectingId === vol.id ? 'Rejecting...' : 'Reject'}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -180,7 +308,10 @@ const Volunteers = () => {
                 <X size={20} />
               </button>
             </div>
-            <p className="text-sm text-gray-500 mb-6">Will auto-generate a secure password and send an email invitation.</p>
+            <p className="text-sm text-gray-500 mb-2">Will auto-generate a secure password and send an email invitation.</p>
+            <div className="bg-green-50 border border-green-100 rounded-lg p-2 mb-4">
+              <p className="text-green-700 text-xs flex items-center gap-1"><ShieldCheck size={13} /> Auto-approved — no review needed</p>
+            </div>
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
