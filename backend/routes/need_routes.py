@@ -1,6 +1,7 @@
 """
 Need routes – Upload reports and list needs.
 Supports both raw text and file uploads (PDF, DOCX, TXT).
+Uses the ASYNC hybrid NLP pipeline (Rule-based + Groq LLM + OpenCage geocoding).
 """
 
 import logging
@@ -12,9 +13,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.need import Need, UrgencyLevel, NeedStatus
 from schemas.need_schema import ReportUpload, NeedResponse
-from services.nlp_service import extract_from_text
+from services.nlp_service import extract_from_text_async
 from services.priority_service import compute_priority_score
-from utils.location_utils import geocode_location
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Needs"])
@@ -57,30 +57,32 @@ def _extract_text_from_docx(file_bytes: bytes) -> str:
         raise HTTPException(status_code=400, detail=f"Failed to read DOCX: {str(e)}")
 
 
-def _process_and_store_need(raw_text: str, db: Session) -> Need:
-    """Shared logic: NLP → priority → store in DB."""
-    # 1. NLP extraction
-    extracted = extract_from_text(raw_text)
+async def _process_and_store_need(raw_text: str, db: Session) -> Need:
+    """
+    Shared logic: Hybrid NLP pipeline → priority → store in DB.
 
-    # 2. Geocode location if possible
-    lat, lon = geocode_location(extracted.get("location"))
+    Uses the ASYNC hybrid pipeline:
+      Preprocess → Summarize → Rule-based → Groq LLM → Geocoding → Merge → Fallback
+    """
+    # 1. Full hybrid NLP extraction (async)
+    extracted = await extract_from_text_async(raw_text)
 
-    # 3. Compute priority score
+    # 2. Compute priority score
     priority = compute_priority_score(
         urgency=extracted["urgency"],
         people_affected=extracted["people_affected"],
         category=extracted["category"],
     )
 
-    # 4. Persist to database
+    # 3. Persist to database
     need = Need(
         raw_text=raw_text,
         category=extracted["category"],
         urgency=UrgencyLevel(extracted["urgency"]),
         people_affected=extracted["people_affected"],
         location=extracted.get("location"),
-        latitude=lat,
-        longitude=lon,
+        latitude=extracted.get("latitude"),
+        longitude=extracted.get("longitude"),
         priority_score=priority,
         status=NeedStatus.PENDING,
     )
@@ -88,20 +90,28 @@ def _process_and_store_need(raw_text: str, db: Session) -> Need:
     db.commit()
     db.refresh(need)
 
-    logger.info("Created need id=%d category=%s priority=%.2f", need.id, need.category, need.priority_score)
+    logger.info(
+        "Created need id=%d category=%s urgency=%s people=%d location=%s "
+        "lat=%.4f lon=%.4f priority=%.2f confidence=%d",
+        need.id, need.category, need.urgency.value, need.people_affected,
+        need.location or "unknown",
+        need.latitude or 0, need.longitude or 0,
+        need.priority_score, extracted.get("confidence", 0),
+    )
     return need
 
 
 # ── Endpoints ────────────────────────────────────────────────────
 
 @router.post("/upload-report", response_model=NeedResponse, status_code=201)
-def upload_report(
+async def upload_report(
     payload: ReportUpload,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
-    Accept a raw NGO survey report as **text**, process it through the NLP pipeline,
+    Accept a raw NGO survey report as **text**, process it through the
+    hybrid NLP pipeline (Rule-based + Groq LLM + Geocoding),
     compute priority score, and store the structured need.
 
     **Sample request body:**
@@ -110,8 +120,17 @@ def upload_report(
         "raw_text": "Urgent: 200 families in Kathmandu need clean drinking water and medical supplies immediately."
     }
     ```
+
+    **Pipeline:**
+    1. Preprocessing (slang expansion, cleanup)
+    2. Summarization (for long text)
+    3. Rule-based extraction (category, urgency, people count)
+    4. Groq LLM extraction (structured JSON)
+    5. Location extraction (LLM + spaCy NER + city fallback)
+    6. OpenCage geocoding (lat/lon)
+    7. Merge + fallback defaults
     """
-    need = _process_and_store_need(payload.raw_text, db)
+    need = await _process_and_store_need(payload.raw_text, db)
     background_tasks.add_task(_log_new_need, need.id, need.category)
     return need
 
@@ -124,7 +143,7 @@ async def upload_file(
 ):
     """
     Upload an NGO survey report as a **file** (PDF, DOCX, or TXT).
-    The text is extracted from the file, then processed through the NLP pipeline.
+    The text is extracted from the file, then processed through the hybrid NLP pipeline.
 
     **Supported formats:** `.pdf`, `.docx`, `.txt`
     """
@@ -156,7 +175,7 @@ async def upload_file(
 
     logger.info("Extracted %d characters from '%s'", len(raw_text), filename)
 
-    need = _process_and_store_need(raw_text, db)
+    need = await _process_and_store_need(raw_text, db)
     background_tasks.add_task(_log_new_need, need.id, need.category)
     return need
 
@@ -214,4 +233,3 @@ def get_need(need_id: int, db: Session = Depends(get_db)):
 def _log_new_need(need_id: int, category: str):
     """Background task to log need creation (extendable for notifications)."""
     logger.info("[BG] New need recorded: id=%d category=%s", need_id, category)
-

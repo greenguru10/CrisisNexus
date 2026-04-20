@@ -4,7 +4,9 @@
   <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" />
   <img src="https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white" />
+  <img src="https://img.shields.io/badge/Groq_LLM-FF6B35?style=for-the-badge&logo=meta&logoColor=white" />
   <img src="https://img.shields.io/badge/spaCy-09A3D5?style=for-the-badge&logo=spacy&logoColor=white" />
+  <img src="https://img.shields.io/badge/OpenCage-2ECC71?style=for-the-badge&logo=openstreetmap&logoColor=white" />
   <img src="https://img.shields.io/badge/JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white" />
   <img src="https://img.shields.io/badge/Twilio-F22F46?style=for-the-badge&logo=twilio&logoColor=white" />
 
@@ -14,11 +16,11 @@
 
   ### Smart Resource Allocation & Volunteer Coordination System
 
-  *An AI-powered, full-stack disaster response platform that transforms unstructured crisis reports into prioritized, actionable assignments — matching the right volunteer to the right need, instantly.*
+  *An AI-powered, full-stack disaster response platform that transforms unstructured crisis reports into prioritized, actionable assignments — matching the right volunteer to the right need, instantly. Powered by a hybrid NLP pipeline combining Groq LLM + rule-based extraction + OpenCage geocoding.*
 
   <br/>
 
-  **NLP-Driven** · **Task Lifecycle Tracking** · **Role-Based Access** · **Auto Notifications** · **Workload-Aware Matching**
+  **Groq LLM + Rule-Based NLP** · **Volunteer Approval Workflow** · **OpenCage Geocoding** · **Task Lifecycle Tracking** · **Role-Based Access** · **Auto Notifications** · **Workload-Aware Matching**
 
 </div>
 
@@ -43,13 +45,26 @@
 
 ## ✨ Features
 
-### 🧠 AI & NLP Engine (Enhanced)
-- **Slang-Aware Preprocessing** — Normalizes 25+ mixed-language and shorthand terms before extraction: `khana → food`, `paani → water`, `ppl → people`, `sos → emergency`, `urgo → urgent`, `dawa → medicine`, and more.
-- **Multi-Category Detection** — Scores 8 categories (`food`, `water`, `medical`, `shelter`, `clothing`, `sanitation`, `education`, `logistics`) using word-boundary regex to eliminate false positives.
+### 🧠 Hybrid NLP Pipeline (Groq LLM + Rules)
+- **10-Stage Pipeline** — `Raw Input → Preprocess → Summarize → Rule-based → Groq LLM → Location → Geocoding → Merge → Fallback → Output`
+- **Groq LLM Integration (COMPULSORY)** — Uses `llama-3.1-8b-instant` via the Groq API for structured extraction of categories, people count, urgency, description, and location. Async with 15s timeout fallback.
+- **Slang-Aware Preprocessing** — Normalizes 40+ mixed-language and shorthand terms: `khana → food`, `paani → water`, `ppl → people`, `bimaar → sick`, `madad → help`, `bachao → save`, `jaldi → quickly`, and more.
+- **Multi-Category Detection** — Scores 8 categories (`food`, `water`, `medical`, `shelter`, `clothing`, `sanitation`, `education`, `logistics`) using word-boundary regex. Returns **all matched categories**, not just the top one.
+- **Smart Summarization** — Long reports are automatically summarized by scoring sentences on disaster-keyword density and selecting the top 2–4 most relevant sentences.
 - **Dual-Pattern People Extraction** — Detects counts via `"200 families"` OR `"people affected: 300"` patterns; falls back to any standalone number ≥ 10, then defaults to `5`.
-- **Tiered Urgency Detection** — Strict regex word-boundary matching for 20+ high-urgency phrases (`sos`, `life-threatening`, `mass casualty`, `asap`) before medium-level fallback; never defaults to `low`.
-- **Empty Input Guard** — Returns safe structured defaults if a blank report is submitted; never crashes.
-- **Smart Volunteer Matching** — Composite score using **Jaccard Skill Similarity** (50%), **Haversine Proximity** (35%), **Performance Rating** (15%), plus **Workload Penalty** — volunteers with active tasks are deprioritized automatically.
+- **Tiered Urgency Detection** — 25+ high-urgency phrases (`sos`, `life-threatening`, `mass casualty`, `bachao`, `turant`) before medium-level fallback.
+- **Confidence Scoring** — LLM success → 90 (high), rule-based with matches → 65 (medium), fallback only → 40 (low).
+- **Graceful Degradation** — If Groq is unavailable, falls back cleanly to rule-based extraction without errors.
+
+### 📍 Location & Geocoding
+- **3-Tier Location Extraction** — Groq LLM (primary) → spaCy NER GPE/LOC entities (secondary) → static city lookup (fallback).
+- **OpenCage Geocoding API** — Real-time conversion of location names to `(latitude, longitude)` coordinates via the OpenCage API.
+- **LRU Cache (256 entries)** — Geocoding results are cached in-memory to avoid repeated API calls for the same location.
+- **Static City Fallback** — 20+ pre-loaded city coordinates (Mumbai, Delhi, Kathmandu, etc.) for instant offline geocoding.
+
+### 🤖 Smart Volunteer Matching
+- Composite score: **Jaccard Skill Similarity** (50%), **Haversine Proximity** (35%), **Performance Rating** (15%), plus **Workload Penalty**.
+- Only **approved** volunteers are eligible for matching — pending/rejected accounts are excluded.
 
 ### 🔄 Task Lifecycle Tracking
 - **5-Stage Pipeline**: `Pending → Assigned → Accepted → In Progress → Completed`
@@ -57,17 +72,27 @@
 - **Interactive Status Actions**: Volunteers can progress tasks with dedicated stage buttons (Accept → Start → Complete).
 - **Feedback & Ratings**: On task completion, volunteers submit a 1–5 star rating and comments stored for performance analytics.
 
+### ✅ Volunteer Approval Workflow
+- **Signup → Pending → Admin Review → Approved/Rejected** — New volunteer signups require admin approval before login.
+- **Login Gating** — Unapproved volunteers receive `403 Forbidden` with a descriptive message (`"Account pending approval"` / `"Account has been rejected"`).
+- **Admin Approval Dashboard** — Dedicated "Pending Approval" tab with Approve/Reject action buttons and pulsing badge count.
+- **Auto Onboarding** — On approval, the system automatically sends a **Welcome Email** + **WhatsApp onboarding message** via background tasks.
+- **Admin-Created Volunteers** — Auto-approved with a generated secure password emailed to the volunteer.
+- **Assignment Gating** — Only approved volunteers can be matched/assigned to tasks.
+- **Self-Service Skills** — Volunteers can add skills during registration and update them on their profile page.
+
 ### 🔐 Authentication & Role-Based Access Control (RBAC)
 - **JWT-Based Auth** — Secure token authentication with configurable expiry.
+- **Account Status Enforcement** — `account_status` field (`pending`/`approved`/`rejected`) on the User model gates volunteer access at the authentication layer.
 - **Frontend RBAC Enforcement** — `<ProtectedRoute allowedRoles={[...]}>` wrapper on every React route; URL hacking redirects to a styled `/unauthorized` page.
 - **Auth Utility Helpers** — Centralized `src/utils/auth.js` with `isAdmin()`, `isNGO()`, `isVolunteer()` functions used throughout the UI.
 - **Three Distinct User Tiers:**
 
   | Role | Dashboard View | Key Capabilities |
   |------|---------------|-----------------|
-  | **Admin** | Full analytics + 5-state lifecycle widgets | Match/Unassign/Reassign needs, manage volunteers |
+  | **Admin** | Full analytics + 5-state lifecycle widgets + approval queue | Match/Unassign/Reassign needs, approve/reject volunteers |
   | **NGO** | Needs overview + urgency/category charts | Upload reports, view analytics |
-  | **Volunteer** | Interactive "My Tasks" (Accept/Start/Complete) | Manage own assignments, submit feedback |
+  | **Volunteer** | Interactive "My Tasks" (Accept/Start/Complete) | Manage own assignments, submit feedback, edit skills |
 
 ### 📊 Role-Specific Dashboard Views
 - **AdminDashboard** — 5-card lifecycle overview (Pending, Assigned, Accepted, In Progress, Completed), category/urgency breakdowns, volunteer capacity metrics.
@@ -128,8 +153,9 @@ Each transition is validated server-side. Invalid transitions (e.g., jumping fro
 | **Frontend** | React 18, React Router DOM, Tailwind CSS, Axios, Lucide Icons |
 | **Backend** | FastAPI, Python 3.10, Uvicorn, Pydantic v2 |
 | **Database** | PostgreSQL, SQLAlchemy 2.0, pg8000 (Pure Python Driver) |
-| **AI / NLP** | spaCy (`en_core_web_sm`), Rule-based keyword extraction with slang normalization |
-| **Authentication** | JWT (`python-jose`), bcrypt (`passlib`) |
+| **AI / NLP** | Groq LLM (`llama-3.1-8b-instant`), spaCy (`en_core_web_sm`), Rule-based keyword extraction |
+| **Geocoding** | OpenCage Geocoding API (with LRU cache), Haversine distance calculation |
+| **Authentication** | JWT (`python-jose`), bcrypt (`passlib`), Account status gating |
 | **RBAC** | Frontend `<ProtectedRoute>` + Backend role dependency injection |
 | **Email** | FastAPI-Mail (`aiosmtplib`) |
 | **Messaging** | Twilio API (WhatsApp Sandbox / Production) |
@@ -140,20 +166,28 @@ Each transition is validated server-side. Invalid transitions (e.g., jumping fro
 
 ## 🏗 System Architecture
 
-CommunitySync operates on a **6-stage automated pipeline:**
+CommunitySync operates on a **10-stage hybrid AI pipeline:**
 
 ```
-┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
-│ 📄 REPORT │──▶│🔤 PREPROC │──▶│ 🧠 NLP   │──▶│ 🎯 SCORE │──▶│ 🤝 MATCH │──▶│ 📬 NOTIFY│
-│  Upload  │   │ Slang    │   │ Extract  │   │  0-100   │   │ Workload │   │ Email +  │
-│(Text/PDF)│   │ Expand   │   │ Category │   │ Priority │   │  Aware   │   │ WhatsApp │
-└──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘
-                                                                    │
-                                                                    ▼
-                                                         ┌──────────────────┐
-                                                         │ 🔄 TASK LIFECYCLE │
-                                                         │ Accept→Start→Done │
-                                                         └──────────────────┘
+┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
+│ 📄 REPORT │──▶│🔤 PREPROC │──▶│📝 SUMMAR- │──▶│📏 RULE   │──▶│🤖 GROQ   │
+│  Upload  │   │ Slang    │   │  IZE     │   │ BASED    │   │  LLM     │
+│(Text/PDF)│   │ 40+ maps │   │(long txt)│   │ Extract  │   │ Extract  │
+└──────────┘   └──────────┘   └──────────┘   └──────────┘   └────┬─────┘
+                                                                  │
+     ┌────────────────────────────────────────────────────────────┘
+     ▼
+┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
+│🔀 MERGE  │──▶│📍 GEOCODE│──▶│ 🎯 SCORE │──▶│ 🤝 MATCH │──▶│ 📬 NOTIFY│
+│ LLM +    │   │ OpenCage │   │  0-100   │   │ Workload │   │ Email +  │
+│ Rules    │   │ Cached   │   │ Priority │   │  Aware   │   │ WhatsApp │
+└──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘
+                                                                  │
+                                                                  ▼
+                                                       ┌──────────────────┐
+                                                       │ 🔄 TASK LIFECYCLE │
+                                                       │ Accept→Start→Done │
+                                                       └──────────────────┘
 ```
 
 **Data Flow:**
@@ -193,10 +227,10 @@ CommunitySync operates on a **6-stage automated pipeline:**
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
-| `POST` | `/auth/register` | Register a new user account | Public |
-| `POST` | `/auth/login` | Authenticate and receive JWT token | Public |
-| `GET` | `/auth/me` | Get current user profile (syncs mobile/location from volunteer record) | Authenticated |
-| `PUT` | `/auth/me` | Update profile (email, mobile, location, password) | Authenticated |
+| `POST` | `/auth/register` | Register user (volunteers start as `pending`, auto-creates volunteer profile with skills) | Public |
+| `POST` | `/auth/login` | Authenticate & get JWT (blocks unapproved volunteers with `403`) | Public |
+| `GET` | `/auth/me` | Get profile (syncs mobile/location/skills from volunteer record) | Authenticated |
+| `PUT` | `/auth/me` | Update profile (email, mobile, location, skills, password) | Authenticated |
 | `POST` | `/auth/forgot-password` | Request password reset email | Public |
 | `POST` | `/auth/reset-password` | Reset password with token | Public |
 
@@ -204,8 +238,8 @@ CommunitySync operates on a **6-stage automated pipeline:**
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
-| `POST` | `/api/upload-report` | Submit raw text report for NLP processing | Authenticated |
-| `POST` | `/api/upload-file` | Upload PDF/DOCX/TXT report file | Authenticated |
+| `POST` | `/api/upload-report` | Submit raw text → **hybrid NLP pipeline** (LLM + rules + geocoding) | Authenticated |
+| `POST` | `/api/upload-file` | Upload PDF/DOCX/TXT → same hybrid pipeline | Authenticated |
 | `GET` | `/api/needs` | List all needs (filterable by status, category, urgency) | Authenticated |
 | `GET` | `/api/needs/{id}` | Get a single need by ID | Authenticated |
 
@@ -213,8 +247,8 @@ CommunitySync operates on a **6-stage automated pipeline:**
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
-| `POST` | `/api/match/{need_id}` | Auto-match best volunteer (workload-aware AI scoring) | Admin / NGO |
-| `POST` | `/api/match/{need_id}/manual` | Manually assign a specific volunteer | Admin |
+| `POST` | `/api/match/{need_id}` | Auto-match best **approved** volunteer (workload-aware AI scoring) | Admin / NGO |
+| `POST` | `/api/match/{need_id}/manual` | Manually assign a specific **approved** volunteer | Admin |
 | `POST` | `/api/match/{need_id}/unassign` | Remove volunteer from a need | Admin |
 
 ### 🔄 Task Lifecycle (Volunteer Actions)
@@ -226,13 +260,17 @@ CommunitySync operates on a **6-stage automated pipeline:**
 | `POST` | `/api/task/{need_id}/start` | Volunteer starts work → status: `in_progress` | Volunteer |
 | `POST` | `/api/task/{need_id}/complete` | Volunteer completes task with rating/comments → status: `completed` | Volunteer |
 
-### 👥 Volunteer Management
+### 👥 Volunteer Management & Approval
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
-| `GET` | `/api/volunteers` | List all volunteers | Admin / NGO |
-| `POST` | `/api/volunteer` | Admin-create volunteer (auto-password, sends welcome email) | Admin |
-| `DELETE` | `/api/volunteer/{id}` | Delete a volunteer | Admin |
+| `GET` | `/api/volunteers` | List all **approved** volunteers | Admin / NGO |
+| `GET` | `/api/volunteers/pending` | List volunteers awaiting approval | Admin |
+| `POST` | `/api/volunteer/{id}/approve` | Approve pending volunteer (triggers welcome email + WhatsApp) | Admin |
+| `POST` | `/api/volunteer/{id}/reject` | Reject pending volunteer | Admin |
+| `POST` | `/api/volunteer` | Admin-create volunteer (auto-approved, sends credentials email) | Admin |
+| `PUT` | `/api/volunteer/{id}` | Update volunteer details | Admin |
+| `DELETE` | `/api/volunteer/{id}` | Delete a volunteer and their user account | Admin |
 
 ### 📊 Analytics
 
@@ -276,14 +314,18 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Install Groq LLM client
+pip install groq
+
 # Download spaCy language model
 python -m spacy download en_core_web_sm
 
 # Configure environment (see section below)
 # Create .env file in backend/
 
-# Run database enum migration (required once after first setup)
+# Run database migrations (required once after first setup)
 python fix_enum.py
+python migrate_account_status.py
 
 # Start the server
 uvicorn main:app --reload
@@ -308,7 +350,9 @@ cd backend
 python test_scripts/generate_dummy_data.py
 ```
 
-> ⚠️ **Note on Enum Migration:** If you are upgrading an existing database from an earlier version, run `python fix_enum.py` in the backend directory once. This safely adds the `ACCEPTED` and `IN_PROGRESS` values to the PostgreSQL `needstatus` enum without data loss.
+> ⚠️ **Note on Migrations:** If upgrading an existing database:
+> - `python fix_enum.py` — Adds `ACCEPTED`/`IN_PROGRESS` values to the `needstatus` enum.
+> - `python migrate_account_status.py` — Adds the `account_status` column to the `users` table (idempotent, safe to run multiple times).
 
 ---
 
@@ -342,9 +386,16 @@ EMAIL_FROM=your.email@gmail.com
 TWILIO_ACCOUNT_SID=your_twilio_account_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_PHONE=+14155238886
+TWILIO_JOIN_CODE=store-creature
+
+# ── Groq LLM (required for AI-powered NLP extraction) ───────────
+GROQ_API_KEY=gsk_your_groq_api_key_here
+
+# ── OpenCage Geocoding (required for location-to-coordinates) ────
+OPENCAGE_API_KEY=your_opencage_api_key_here
 ```
 
-> ⚠️ For Gmail, use an [App Password](https://support.google.com/accounts/answer/185833), not your regular password. For Twilio WhatsApp, recipients must first opt-in via the [Twilio Sandbox](https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn).
+> ⚠️ For Gmail, use an [App Password](https://support.google.com/accounts/answer/185833), not your regular password. For Twilio WhatsApp, recipients must first opt-in via the [Twilio Sandbox](https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn). Get a free Groq API key at [console.groq.com](https://console.groq.com). Get a free OpenCage API key at [opencagedata.com](https://opencagedata.com/users/sign_up).
 
 ---
 
@@ -358,10 +409,22 @@ TWILIO_PHONE=+14155238886
 📄 Upload Crisis Report (text or PDF/DOCX)
        │
        ▼
-🔤 Slang Preprocessing (khana→food, paani→water, ppl→people…)
+🔤 Slang Preprocessing (40+ terms: khana→food, paani→water, ppl→people…)
        │
        ▼
-🧠 NLP Engine extracts: category, urgency, location, people_affected
+📝 Summarize long text (top 2-4 sentences by keyword density)
+       │
+       ▼
+📏 Rule-Based Extraction (multi-category, urgency, people count, spaCy NER)
+       │
+       ▼
+🤖 Groq LLM Extraction (structured JSON via llama-3.1-8b-instant)
+       │
+       ▼
+🔀 Merge Results (LLM preferred, rule-based fallback) → Confidence Score
+       │
+       ▼
+📍 OpenCage Geocoding (location → lat/lon, cached)
        │
        ▼
 🎯 Priority Score computed (0–100)
@@ -370,7 +433,7 @@ TWILIO_PHONE=+14155238886
 📊 Need appears on Dashboard with status badge "Pending"
        │
        ▼
-🤝 Admin clicks "Auto Match" (workload-aware) or "Manual"
+🤝 Admin clicks "Auto Match" (only approved volunteers, workload-aware)
        │
        ▼
 📬 Volunteer receives Email + WhatsApp alert → Status: "Assigned"
@@ -400,14 +463,15 @@ TWILIO_PHONE=+14155238886
 | View Dashboard (role-specific) | ✅ Full Analytics | ✅ Needs Overview | ✅ My Tasks |
 | Upload Reports | ✅ | ✅ | ✅ |
 | View Needs Table | ✅ | ✅ | ❌ |
-| Auto / Manual Match | ✅ | ✅ | ❌ |
+| Auto / Manual Match (approved only) | ✅ | ✅ | ❌ |
 | Unassign / Reassign | ✅ | ❌ | ❌ |
-| Create Volunteers | ✅ | ❌ | ❌ |
+| Approve / Reject Volunteers | ✅ | ❌ | ❌ |
+| Create Volunteers (auto-approved) | ✅ | ❌ | ❌ |
 | Delete Volunteers | ✅ | ❌ | ❌ |
 | View Volunteers List | ✅ | ❌ | ❌ |
 | Accept / Start / Complete Tasks | ❌ | ❌ | ✅ |
 | Submit Task Feedback & Rating | ❌ | ❌ | ✅ |
-| Edit Own Profile | ✅ | ✅ | ✅ |
+| Edit Own Profile + Skills | ✅ | ✅ | ✅ |
 | Access `/volunteers` URL directly | ✅ | 🚫 Redirected | 🚫 Redirected |
 
 ---
