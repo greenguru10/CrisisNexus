@@ -1,15 +1,16 @@
 import React from 'react';
-import { LayoutDashboard, HeartPulse, Users, BarChart3, Upload, HelpCircle, LogOut } from 'lucide-react';
+import { LayoutDashboard, HeartPulse, Users, Upload, HelpCircle, LogOut } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
+import { getRole } from '../utils/auth';
 
 const Sidebar = () => {
-  const role = localStorage.getItem('role') || 'volunteer';
+  const role = getRole();
   const location = useLocation();
 
   const allNavItems = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard', roles: ['admin', 'ngo', 'volunteer'] },
-    { label: 'Needs', icon: HeartPulse, path: '/needs', roles: ['admin', 'ngo', 'volunteer'] },
-    { label: 'Volunteers', icon: Users, path: '/volunteers', roles: ['admin', 'ngo'] },
+    { label: 'Needs', icon: HeartPulse, path: '/needs', roles: ['admin', 'ngo'] },
+    { label: 'Volunteers', icon: Users, path: '/volunteers', roles: ['admin'] },
     { label: 'Upload Report', icon: Upload, path: '/upload', roles: ['admin', 'ngo', 'volunteer'] },
   ];
 

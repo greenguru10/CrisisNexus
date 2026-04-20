@@ -37,6 +37,7 @@ CATEGORY_SKILL_MAP: dict[str, list[str]] = {
 def find_best_volunteer(
     need: Need,
     volunteers: List[Volunteer],
+    workloads: Optional[Dict[int, int]] = None
 ) -> Optional[Dict]:
     """
     Score all available volunteers against a need and return the best match.
@@ -45,6 +46,8 @@ def find_best_volunteer(
         dict with volunteer_id, volunteer_name, match_score, distance_km, skill_match
         or None if no suitable volunteer found.
     """
+    if workloads is None:
+        workloads = {}
     if not volunteers:
         return None
 
@@ -54,8 +57,12 @@ def find_best_volunteer(
     relevant_skills = set(CATEGORY_SKILL_MAP.get(need.category, CATEGORY_SKILL_MAP["general"]))
 
     for vol in volunteers:
-        if not vol.availability:
-            continue
+        # Availability Score: 1.0 if available, 0.2 if busy (but still considered)
+        availability_score = 1.0 if vol.availability else 0.2
+
+        # Workload Score: Inverse scaling based on active tasks (maxed out penalty at 5 tasks)
+        active_tasks = workloads.get(vol.id, 0)
+        workload_score = max(0.0, 1.0 - (active_tasks * 0.2))
 
         # Skill similarity (Jaccard-like)
         vol_skills = set(s.lower().strip() for s in (vol.skills or []))
@@ -80,7 +87,8 @@ def find_best_volunteer(
         rating_score = (vol.rating or 0.0) / 5.0
 
         # Composite score
-        composite = (skill_score * 0.50) + (distance_score * 0.35) + (rating_score * 0.15)
+        # skill (40%), distance (20%), rating (10%), availability (15%), workload (15%)
+        composite = (skill_score * 0.40) + (distance_score * 0.20) + (rating_score * 0.10) + (availability_score * 0.15) + (workload_score * 0.15)
 
         if composite > best_score:
             best_score = composite

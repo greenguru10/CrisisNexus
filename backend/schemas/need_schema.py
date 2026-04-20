@@ -17,6 +17,8 @@ class UrgencyLevel(str, Enum):
 class NeedStatus(str, Enum):
     PENDING = "pending"
     ASSIGNED = "assigned"
+    ACCEPTED = "accepted"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
 
 
@@ -50,6 +52,8 @@ class NeedBase(BaseModel):
     status: NeedStatus
     assigned_volunteer_id: Optional[int] = None
     assigned_volunteer_name: Optional[str] = None
+    feedback_rating: Optional[float] = None
+    feedback_comments: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

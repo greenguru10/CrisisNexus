@@ -122,6 +122,8 @@ def get_me(db: Session = Depends(get_db), current_user: User = Depends(get_curre
     volunteer = db.query(Volunteer).filter(Volunteer.email == current_user.email).first()
     if volunteer:
         user_resp.location = volunteer.location
+        if not user_resp.mobile_number and volunteer.mobile_number:
+            user_resp.mobile_number = volunteer.mobile_number
     return user_resp
 
 @router.put("/me", response_model=UserResponse)

@@ -54,13 +54,19 @@ def match_volunteer(
     if need.status == NeedStatus.COMPLETED:
         raise HTTPException(status_code=400, detail=f"Need {need_id} is already completed")
 
-    # Get all available volunteers
-    available_volunteers = db.query(Volunteer).filter(Volunteer.availability == True).all()
+    # Get all volunteers (since we changed matching logic to consider availability as a score rather than exclusion)
+    available_volunteers = db.query(Volunteer).all()
     if not available_volunteers:
-        raise HTTPException(status_code=404, detail="No available volunteers found")
+        raise HTTPException(status_code=404, detail="No volunteers registered in system")
+
+    # Fetch workload for passing to matching logic
+    active_needs = db.query(Need.assigned_volunteer_id, func.count(Need.id)).filter(
+        Need.status.in_([NeedStatus.PENDING, NeedStatus.ACCEPTED, NeedStatus.IN_PROGRESS])
+    ).group_by(Need.assigned_volunteer_id).all()
+    workloads = {vol_id: count for vol_id, count in active_needs if vol_id}
 
     # Find best match
-    result = find_best_volunteer(need, available_volunteers)
+    result = find_best_volunteer(need, available_volunteers, workloads)
     if not result:
         raise HTTPException(status_code=404, detail="No suitable volunteer found for this need")
 
@@ -221,6 +227,8 @@ def dashboard(db: Session = Depends(get_db)):
     """
     total_needs = db.query(func.count(Need.id)).scalar() or 0
     pending = db.query(func.count(Need.id)).filter(Need.status == NeedStatus.PENDING).scalar() or 0
+    accepted = db.query(func.count(Need.id)).filter(Need.status == NeedStatus.ACCEPTED).scalar() or 0
+    in_progress = db.query(func.count(Need.id)).filter(Need.status == NeedStatus.IN_PROGRESS).scalar() or 0
     assigned = db.query(func.count(Need.id)).filter(Need.status == NeedStatus.ASSIGNED).scalar() or 0
     completed = db.query(func.count(Need.id)).filter(Need.status == NeedStatus.COMPLETED).scalar() or 0
     high_priority = db.query(func.count(Need.id)).filter(Need.urgency == "high").scalar() or 0
@@ -242,6 +250,8 @@ def dashboard(db: Session = Depends(get_db)):
     return {
         "total_needs": total_needs,
         "pending_needs": pending,
+        "accepted_needs": accepted,
+        "in_progress_needs": in_progress,
         "assigned_needs": assigned,
         "completed_needs": completed,
         "high_priority_needs": high_priority,

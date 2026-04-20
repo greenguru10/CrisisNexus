@@ -11,11 +11,11 @@ import Upload from './pages/Upload';
 import Profile from './pages/Profile';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import VolunteerTasks from './pages/VolunteerTasks';
+import ProtectedRoute from './components/ProtectedRoute';
+import Unauthorized from './pages/Unauthorized';
 
 const ProtectedLayout = () => {
-  const role = localStorage.getItem('role') || 'volunteer';
-  const isAdminOrNgo = role === 'admin' || role === 'ngo';
-
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       <Sidebar />
@@ -23,17 +23,37 @@ const ProtectedLayout = () => {
         <TopBar />
         <main className="flex-1 overflow-y-auto p-6">
           <Routes>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/needs" element={<Needs />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/upload" element={<Upload />} />
-            
-            {/* Restricted Routes */}
-            {isAdminOrNgo && (
-              <>
-                <Route path="/volunteers" element={<Volunteers />} />
-              </>
-            )}
+            <Route path="/dashboard" element={
+              <ProtectedRoute allowedRoles={['admin', 'ngo', 'volunteer']}>
+                <Dashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/needs" element={
+              <ProtectedRoute allowedRoles={['admin', 'ngo']}>
+                <Needs />
+              </ProtectedRoute>
+            } />
+            <Route path="/profile" element={
+               <ProtectedRoute allowedRoles={['admin', 'ngo', 'volunteer']}>
+                 <Profile />
+               </ProtectedRoute>
+            } />
+            <Route path="/tasks" element={
+              <ProtectedRoute allowedRoles={['volunteer']}>
+                <VolunteerTasks />
+              </ProtectedRoute>
+            } />
+            <Route path="/upload" element={
+              <ProtectedRoute allowedRoles={['admin', 'ngo', 'volunteer']}>
+                <Upload />
+              </ProtectedRoute>
+            } />
+            <Route path="/volunteers" element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <Volunteers />
+              </ProtectedRoute>
+            } />
+            <Route path="/unauthorized" element={<Unauthorized />} />
             
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

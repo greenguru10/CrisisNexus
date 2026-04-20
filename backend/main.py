@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import init_db
-from routes import need_routes, volunteer_routes, matching_routes, auth_routes
+from routes import need_routes, volunteer_routes, matching_routes, auth_routes, task_routes
 
 # ── Logging setup ────────────────────────────────────────────────
 
@@ -73,6 +73,7 @@ app.include_router(auth_routes.router)              # /auth/*
 app.include_router(need_routes.router, prefix="/api")
 app.include_router(volunteer_routes.router, prefix="/api")
 app.include_router(matching_routes.router, prefix="/api")
+app.include_router(task_routes.router, prefix="/api/task")
 
 
 # ── Health check ─────────────────────────────────────────────────

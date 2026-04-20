@@ -1,23 +1,34 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api';
-import { Search, Filter, CheckCircle2, X, AlertTriangle, UserMinus, RefreshCw } from 'lucide-react';
+import { Search, CheckCircle2, X, AlertTriangle, UserMinus, RefreshCw, Clock, Zap, Play, CheckCheck, Loader2 } from 'lucide-react';
 
 const urgencyBadge = (urgency) => {
   const styles = {
-    high: 'bg-red-100 text-red-700',
-    medium: 'bg-amber-100 text-amber-700',
-    low: 'bg-green-100 text-green-700',
+    high: 'bg-red-100 text-red-700 border border-red-200',
+    medium: 'bg-amber-100 text-amber-700 border border-amber-200',
+    low: 'bg-green-100 text-green-700 border border-green-200',
   };
   return styles[urgency] || 'bg-gray-100 text-gray-700';
 };
 
-const statusBadge = (status) => {
-  const styles = {
-    pending: 'bg-amber-50 text-amber-600 border-amber-200',
-    assigned: 'bg-blue-50 text-blue-600 border-blue-200',
-    completed: 'bg-green-50 text-green-600 border-green-200',
-  };
-  return styles[status] || 'bg-gray-50 text-gray-600 border-gray-200';
+const STATUS_CONFIG = {
+  pending:     { label: 'Pending',     icon: Clock,       bg: 'bg-gray-100',    text: 'text-gray-600',   border: 'border-gray-200',   dot: 'bg-gray-400' },
+  assigned:    { label: 'Assigned',    icon: Zap,         bg: 'bg-blue-50',     text: 'text-blue-600',   border: 'border-blue-200',   dot: 'bg-blue-500' },
+  accepted:    { label: 'Accepted',    icon: CheckCircle2,bg: 'bg-indigo-50',   text: 'text-indigo-700', border: 'border-indigo-200', dot: 'bg-indigo-500' },
+  in_progress: { label: 'In Progress', icon: Loader2,     bg: 'bg-purple-50',   text: 'text-purple-700', border: 'border-purple-200', dot: 'bg-purple-500', pulse: true },
+  completed:   { label: 'Completed',   icon: CheckCheck,  bg: 'bg-green-50',    text: 'text-green-700',  border: 'border-green-200',  dot: 'bg-green-500' },
+};
+
+const StatusBadge = ({ status }) => {
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+  const Icon = cfg.icon;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot} ${cfg.pulse ? 'animate-ping' : ''}`}></span>
+      <Icon size={11} className={cfg.pulse ? 'animate-spin' : ''} />
+      {cfg.label}
+    </span>
+  );
 };
 
 const Needs = () => {
@@ -170,12 +181,13 @@ const Needs = () => {
                     <span className="text-xs text-gray-400">/100</span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-col gap-1">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border w-fit ${statusBadge(need.status)}`}>
-                        {need.status}
-                      </span>
+                    <div className="flex flex-col gap-1.5">
+                      <StatusBadge status={need.status} />
                       {need.assigned_volunteer_name && (
-                        <span className="text-xs text-blue-600 font-medium">→ {need.assigned_volunteer_name}</span>
+                        <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                          <span className="w-3 h-px bg-blue-300 inline-block"></span>
+                          {need.assigned_volunteer_name}
+                        </span>
                       )}
                     </div>
                   </td>
@@ -187,30 +199,33 @@ const Needs = () => {
                              onClick={() => handleMatch(need.id)}
                              disabled={matching === need.id}
                              title="Auto-Match using AI Scoring"
-                             className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm shadow-blue-600/20"
+                             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm shadow-blue-600/20"
                            >
-                             {matching === need.id ? 'Loading...' : 'Auto Match'}
+                             <Zap size={12} />
+                             {matching === need.id ? 'Matching...' : 'Auto Match'}
                            </button>
                            <button
                              onClick={() => setManualMatchModalOpen(need.id)}
                              disabled={matching === need.id}
                              title="Pick Volunteer Manually"
-                             className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 disabled:opacity-50 transition-all shadow-sm border border-gray-200"
+                             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-200 disabled:opacity-50 transition-all border border-gray-200"
                            >
                              Manual
                            </button>
                         </div>
                       ) : (
-                        <span className="text-xs text-gray-500 font-medium">Pending Match</span>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-gray-50 text-gray-500 border border-gray-100">
+                          <Clock size={11} /> Awaiting Match
+                        </span>
                       )
                     ) : need.status === 'assigned' && canMatch ? (
                       <div className="flex justify-end gap-2">
                         <button
                           onClick={() => handleUnassign(need.id)}
                           title="Remove volunteer from this need"
-                          className="px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100 transition-all border border-red-100"
+                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 transition-all border border-red-100"
                         >
-                          <UserMinus size={14} className="inline mr-1" /> Unassign
+                          <UserMinus size={12} /> Unassign
                         </button>
                         <button
                           onClick={() => {
@@ -218,14 +233,25 @@ const Needs = () => {
                             setTimeout(() => setManualMatchModalOpen(need.id), 500);
                           }}
                           title="Replace with a different volunteer"
-                          className="px-3 py-2 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-all border border-amber-100"
+                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-100 transition-all border border-amber-100"
                         >
-                          <RefreshCw size={14} className="inline mr-1" /> Reassign
+                          <RefreshCw size={12} /> Reassign
                         </button>
                       </div>
-                    ) : (
-                      <span className="text-xs text-gray-400 capitalize">{need.status}</span>
-                    )}
+                    ) : need.status === 'accepted' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        <CheckCircle2 size={11} /> Volunteer Accepted
+                      </span>
+                    ) : need.status === 'in_progress' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
+                        <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping"></span>
+                        <Play size={11} /> Active Now
+                      </span>
+                    ) : need.status === 'completed' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
+                        <CheckCheck size={11} /> Completed
+                      </span>
+                    ) : null}
                   </td>
                 </tr>
               ))

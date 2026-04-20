@@ -18,6 +18,8 @@ class UrgencyLevel(str, enum.Enum):
 class NeedStatus(str, enum.Enum):
     """Status lifecycle of a need."""
     PENDING = "pending"
+    ACCEPTED = "accepted"
+    IN_PROGRESS = "in_progress"
     ASSIGNED = "assigned"
     COMPLETED = "completed"
 
@@ -38,6 +40,8 @@ class Need(Base):
     priority_score = Column(Float, nullable=False, default=0.0, index=True, comment="Computed 0-100 score")
     status = Column(SAEnum(NeedStatus), nullable=False, default=NeedStatus.PENDING, index=True)
     assigned_volunteer_id = Column(Integer, nullable=True, comment="FK to volunteer who was matched")
+    feedback_rating = Column(Float, nullable=True, comment="Optional post-completion rating 0-5")
+    feedback_comments = Column(Text, nullable=True, comment="Optional post-completion comments")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
