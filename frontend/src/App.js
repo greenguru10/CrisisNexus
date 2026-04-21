@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
+import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -14,6 +15,13 @@ import ResetPassword from './pages/ResetPassword';
 import VolunteerTasks from './pages/VolunteerTasks';
 import ProtectedRoute from './components/ProtectedRoute';
 import Unauthorized from './pages/Unauthorized';
+
+// New multi-NGO pages
+import NgoManagement from './pages/NgoManagement';
+import ResourceInventory from './pages/ResourceInventory';
+import PoolRequests from './pages/PoolRequests';
+import Analytics from './pages/Analytics';
+import Leaderboard from './pages/Leaderboard';
 
 const ProtectedLayout = () => {
   return (
@@ -34,9 +42,9 @@ const ProtectedLayout = () => {
               </ProtectedRoute>
             } />
             <Route path="/profile" element={
-               <ProtectedRoute allowedRoles={['admin', 'ngo', 'volunteer']}>
-                 <Profile />
-               </ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin', 'ngo', 'volunteer']}>
+                <Profile />
+              </ProtectedRoute>
             } />
             <Route path="/tasks" element={
               <ProtectedRoute allowedRoles={['volunteer']}>
@@ -49,12 +57,39 @@ const ProtectedLayout = () => {
               </ProtectedRoute>
             } />
             <Route path="/volunteers" element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'ngo']}>
                 <Volunteers />
               </ProtectedRoute>
             } />
+
+            {/* ── New Federation Routes ── */}
+            <Route path="/ngo-management" element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <NgoManagement />
+              </ProtectedRoute>
+            } />
+            <Route path="/resources" element={
+              <ProtectedRoute allowedRoles={['admin', 'ngo']}>
+                <ResourceInventory />
+              </ProtectedRoute>
+            } />
+            <Route path="/pool-requests" element={
+              <ProtectedRoute allowedRoles={['admin', 'ngo']}>
+                <PoolRequests />
+              </ProtectedRoute>
+            } />
+            <Route path="/analytics" element={
+              <ProtectedRoute allowedRoles={['admin', 'ngo']}>
+                <Analytics />
+              </ProtectedRoute>
+            } />
+            <Route path="/leaderboard" element={
+              <ProtectedRoute allowedRoles={['admin', 'ngo', 'volunteer']}>
+                <Leaderboard />
+              </ProtectedRoute>
+            } />
+
             <Route path="/unauthorized" element={<Unauthorized />} />
-            
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
@@ -70,6 +105,8 @@ const App = () => {
   return (
     <Router>
       <Routes>
+        {/* Public landing page */}
+        <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -80,7 +117,7 @@ const App = () => {
             isAuthenticated ? (
               <ProtectedLayout />
             ) : (
-              <Navigate to="/login" replace />
+              <Navigate to="/" replace />
             )
           }
         />

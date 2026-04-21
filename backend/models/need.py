@@ -2,7 +2,7 @@
 Need model – represents an NGO survey report converted into a structured need.
 """
 
-from sqlalchemy import Column, Integer, String, Float, Text, Enum as SAEnum, DateTime
+from sqlalchemy import Column, Integer, String, Float, Text, Enum as SAEnum, DateTime, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from database import Base
 import enum
@@ -42,6 +42,13 @@ class Need(Base):
     assigned_volunteer_id = Column(Integer, nullable=True, comment="FK to volunteer who was matched")
     feedback_rating = Column(Float, nullable=True, comment="Optional post-completion rating 0-5")
     feedback_comments = Column(Text, nullable=True, comment="Optional post-completion comments")
+    # ── Multi-NGO federation fields ───────────────────────────────
+    ngo_id = Column(Integer, ForeignKey("ngos.id"), nullable=True, index=True,
+                    comment="Which NGO owns/manages this need")
+    assigned_by_admin = Column(Boolean, nullable=False, default=False,
+                               comment="True when Admin pushed this task to the NGO")
+    ngo_accepted = Column(Boolean, nullable=True,
+                          comment="None=pending, True=accepted, False=rejected by NGO coordinator")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

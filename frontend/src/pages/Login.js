@@ -21,8 +21,8 @@ const Login = () => {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('role', data.role);
-      navigate('/dashboard');
-      window.location.reload();
+      if (data.ngo_id) { localStorage.setItem('ngo_id', data.ngo_id); localStorage.setItem('ngo_name', data.ngo_name || ''); }
+      window.location.href = '/dashboard';
     } catch (err) {
       const status = err.response?.status;
       const detail = err.response?.data?.detail || 'Login failed. Please check your credentials.';

@@ -1,348 +1,440 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * Needs.js – Role-aware view for Admin and NGO Coordinator.
+ *
+ * Admin:  See all needs. Click row → Trail panel. "Assign to NGO(s)" button.
+ * NGO:    Tabs — "Assigned to Me" (from Admin) | "My Submitted Needs".
+ *         Accept/Reject assignments. Assign volunteers (auto or manual multi-select).
+ *         Click row → Trail panel.
+ */
+import React, { useEffect, useState, useCallback } from 'react';
 import api from '../services/api';
-import { Search, CheckCircle2, X, AlertTriangle, UserMinus, RefreshCw, Clock, Zap, Play, CheckCheck, Loader2 } from 'lucide-react';
+import TaskTrailPanel from '../components/TaskTrailPanel';
+import {
+  Search, Plus, Upload, Eye, Users, CheckCircle, XCircle,
+  Zap, List, Clock, AlertTriangle, ChevronRight
+} from 'lucide-react';
 
-const urgencyBadge = (urgency) => {
-  const styles = {
-    high: 'bg-red-100 text-red-700 border border-red-200',
-    medium: 'bg-amber-100 text-amber-700 border border-amber-200',
-    low: 'bg-green-100 text-green-700 border border-green-200',
-  };
-  return styles[urgency] || 'bg-gray-100 text-gray-700';
-};
+const ROLE = () => localStorage.getItem('role');
+const NGO_ID = () => localStorage.getItem('ngo_id');
 
-const STATUS_CONFIG = {
-  pending:     { label: 'Pending',     icon: Clock,       bg: 'bg-gray-100',    text: 'text-gray-600',   border: 'border-gray-200',   dot: 'bg-gray-400' },
-  assigned:    { label: 'Assigned',    icon: Zap,         bg: 'bg-blue-50',     text: 'text-blue-600',   border: 'border-blue-200',   dot: 'bg-blue-500' },
-  accepted:    { label: 'Accepted',    icon: CheckCircle2,bg: 'bg-indigo-50',   text: 'text-indigo-700', border: 'border-indigo-200', dot: 'bg-indigo-500' },
-  in_progress: { label: 'In Progress', icon: Loader2,     bg: 'bg-purple-50',   text: 'text-purple-700', border: 'border-purple-200', dot: 'bg-purple-500', pulse: true },
-  completed:   { label: 'Completed',   icon: CheckCheck,  bg: 'bg-green-50',    text: 'text-green-700',  border: 'border-green-200',  dot: 'bg-green-500' },
-};
-
-const StatusBadge = ({ status }) => {
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
-  const Icon = cfg.icon;
+// ── Urgency badge ─────────────────────────────────────────────────────────────
+function UrgencyBadge({ level }) {
+  const map = { HIGH: { bg: '#fef2f2', text: '#dc2626', dot: '#ef4444' }, MEDIUM: { bg: '#fffbeb', text: '#d97706', dot: '#f59e0b' }, LOW: { bg: '#f0fdf4', text: '#15803d', dot: '#22c55e' } };
+  const s = map[level?.toUpperCase()] || map.MEDIUM;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot} ${cfg.pulse ? 'animate-ping' : ''}`}></span>
-      <Icon size={11} className={cfg.pulse ? 'animate-spin' : ''} />
-      {cfg.label}
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.2rem 0.6rem', borderRadius: '999px', background: s.bg, color: s.text, fontSize: '0.72rem', fontWeight: 700 }}>
+      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: s.dot }} />
+      {level || 'MEDIUM'}
     </span>
   );
-};
+}
 
-const Needs = () => {
-  const [needs, setNeeds] = useState([]);
-  const [volunteers, setVolunteers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [matchResult, setMatchResult] = useState(null);
-  const [matching, setMatching] = useState(null);
-  const [filter, setFilter] = useState('');
-  const [manualMatchModalOpen, setManualMatchModalOpen] = useState(null);
-  const [selectedVolunteer, setSelectedVolunteer] = useState('');
-  
-  const role = localStorage.getItem('role') || 'volunteer';
-  const canMatch = role === 'admin' || role === 'ngo';
-
-  useEffect(() => {
-    fetchNeeds();
-    if (canMatch) fetchVolunteers();
-  }, [canMatch]);
-
-  const fetchVolunteers = async () => {
-    try {
-      const { data } = await api.get('/api/volunteers?available=true');
-      setVolunteers(data);
-    } catch (err) { }
+// ── Status badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const map = {
+    pending:     { bg: '#f8fafc', text: '#64748b' },
+    assigned:    { bg: '#eff6ff', text: '#2563eb' },
+    accepted:    { bg: '#f0fdf4', text: '#15803d' },
+    in_progress: { bg: '#fffbeb', text: '#d97706' },
+    completed:   { bg: '#f0fdf4', text: '#15803d' },
+    rejected:    { bg: '#fef2f2', text: '#dc2626' },
   };
+  const s = map[status?.toLowerCase()] || map.pending;
+  return (
+    <span style={{ padding: '0.2rem 0.65rem', borderRadius: '999px', background: s.bg, color: s.text, fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+      {status?.replace(/_/g, ' ')}
+    </span>
+  );
+}
 
-  const fetchNeeds = async () => {
+// ── NgoAssignment badge ───────────────────────────────────────────────────────
+function AssignBadge({ status }) {
+  if (!status) return null;
+  const map = { pending: '#f59e0b', accepted: '#10b981', rejected: '#ef4444' };
+  return (
+    <span style={{ padding: '0.15rem 0.55rem', borderRadius: '999px', background: (map[status] || '#64748b') + '18', color: map[status] || '#64748b', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>
+      {status}
+    </span>
+  );
+}
+
+export default function Needs() {
+  const role = ROLE();
+  const isAdmin = role === 'admin';
+  const isNgo = role === 'ngo';
+
+  const [needs, setNeeds]               = useState([]);
+  const [assignedNeeds, setAssigned]    = useState([]);
+  const [ngoOptions, setNgoOptions]     = useState([]);
+  const [myVolunteers, setMyVols]       = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [filter, setFilter]             = useState('');
+  const [ngoTab, setNgoTab]             = useState('assigned'); // 'assigned' | 'submitted'
+
+  // Trail panel
+  const [trailNeed, setTrailNeed]       = useState(null); // { id, title }
+
+  // Admin: assign-to-NGOs modal
+  const [assignModal, setAssignModal]   = useState(null); // need object
+  const [selectedNgos, setSelectedNgos] = useState([]);
+  const [assignNote, setAssignNote]     = useState('');
+  const [assigning, setAssigning]       = useState(false);
+
+  // NGO: assign-volunteers modal
+  const [volModal, setVolModal]         = useState(null); // need object
+  const [selectedVols, setSelectedVols] = useState([]);
+  const [assigningVols, setAssigningVols] = useState(false);
+
+  const [statusUpdating, setStatusUpdating] = useState(null);
+
+  // ── Data fetching ───────────────────────────────────────────────
+  const fetchNeeds = useCallback(async () => {
+    setLoading(true);
     try {
-      const { data } = await api.get('/api/needs');
-      setNeeds(data);
+      if (isAdmin) {
+        const [needsRes, ngoRes] = await Promise.all([
+          api.get('/api/needs'),
+          api.get('/api/ngo/names'),
+        ]);
+        setNeeds(needsRes.data);
+        setNgoOptions(ngoRes.data);
+      } else if (isNgo) {
+        const [allRes, assignedRes, volRes] = await Promise.all([
+          api.get('/api/needs'),
+          api.get('/api/ngo/needs/assigned').catch(() => ({ data: [] })),
+          api.get('/api/volunteers').catch(() => ({ data: [] })),
+        ]);
+        setNeeds(allRes.data.filter(n => !n.assigned_by_admin || n.ngo_id === parseInt(NGO_ID())));
+        setAssigned(assignedRes.data);
+        setMyVols(volRes.data);
+      }
     } catch (err) {
-      console.error('Failed to fetch needs:', err);
-    } finally {
-      setLoading(false);
+      console.error(err);
     }
-  };
+    setLoading(false);
+  }, [isAdmin, isNgo]);
 
-  const handleMatch = async (id) => {
-    setMatching(id);
-    try {
-      const { data } = await api.post(`/api/match/${id}`);
-      setMatchResult(data);
-      fetchNeeds(); // Refresh list
-    } catch (err) {
-      const detail = err.response?.data?.detail || 'Matching failed';
-      alert(detail);
-    } finally {
-      setMatching(null);
-    }
-  };
+  useEffect(() => { fetchNeeds(); }, [fetchNeeds]);
 
-  const handleUnassign = async (needId) => {
-    if (!window.confirm('Unassign the volunteer from this need? The need will go back to Pending.')) return;
+  // ── Admin: assign to NGOs ───────────────────────────────────────
+  const handleAssignNgos = async () => {
+    if (!selectedNgos.length || !assignModal) return;
+    setAssigning(true);
     try {
-      await api.post(`/api/match/${needId}/unassign`);
+      await api.post(`/api/admin/needs/${assignModal.id}/assign-to-ngos`, {
+        ngo_ids: selectedNgos.map(Number),
+        note: assignNote || null,
+      });
+      setAssignModal(null); setSelectedNgos([]); setAssignNote('');
       fetchNeeds();
-      if (canMatch) fetchVolunteers();
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to unassign');
+      alert(err.response?.data?.detail || 'Assignment failed');
     }
+    setAssigning(false);
   };
 
-  const handleManualMatch = async (e) => {
-    e.preventDefault();
-    setMatching(manualMatchModalOpen);
+  // ── NGO: accept / reject ────────────────────────────────────────
+  const handleNgoAction = async (needId, action) => {
+    setStatusUpdating(needId);
     try {
-      await api.post(`/api/match/${manualMatchModalOpen}/manual`, { volunteer_id: parseInt(selectedVolunteer) });
-      setManualMatchModalOpen(null);
-      setSelectedVolunteer('');
-      fetchNeeds(); // Refresh list
-      if (canMatch) fetchVolunteers();
-      alert("Manual match successful!");
-    } catch(err) {
-       alert(err.response?.data?.detail || 'Matching failed');
-    } finally {
-       setMatching(null);
+      await api.post(`/api/ngo/needs/${needId}/${action}-assignment`);
+      fetchNeeds();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Action failed');
     }
+    setStatusUpdating(null);
   };
 
-  const filtered = needs.filter(n =>
+  // ── NGO: auto-assign volunteer ──────────────────────────────────
+  const handleAutoAssign = async (needId) => {
+    setStatusUpdating(needId);
+    try {
+      await api.post(`/api/match/${needId}`);
+      fetchNeeds();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Auto-assign failed');
+    }
+    setStatusUpdating(null);
+  };
+
+  // ── NGO: manual multi-volunteer assign ──────────────────────────
+  const handleVolAssign = async () => {
+    if (!selectedVols.length || !volModal) return;
+    setAssigningVols(true);
+    try {
+      await api.post(`/api/ngo/needs/${volModal.id}/assign-volunteers`, {
+        volunteer_ids: selectedVols.map(Number),
+      });
+      setVolModal(null); setSelectedVols([]);
+      fetchNeeds();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Volunteer assignment failed');
+    }
+    setAssigningVols(false);
+  };
+
+  // ── Status update (admin) ────────────────────────────────────────
+  const handleStatusChange = async (needId, status) => {
+    setStatusUpdating(needId);
+    try {
+      await api.put(`/api/needs/${needId}/status`, { status });
+      fetchNeeds();
+    } catch { }
+    setStatusUpdating(null);
+  };
+
+  // ── Derived lists ────────────────────────────────────────────────
+  const filterFn = n =>
     (n.category || '').toLowerCase().includes(filter.toLowerCase()) ||
     (n.location || '').toLowerCase().includes(filter.toLowerCase()) ||
-    (n.urgency || '').toLowerCase().includes(filter.toLowerCase())
-  );
+    (n.description || '').toLowerCase().includes(filter.toLowerCase());
 
-  if (loading) {
-    return (
-      <div className="space-y-4 animate-fade-in">
-        {[1, 2, 3, 4].map(i => <div key={i} className="h-16 rounded-xl animate-shimmer"></div>)}
-      </div>
-    );
-  }
+  const displayNeeds = isNgo && ngoTab === 'assigned'
+    ? assignedNeeds.filter(filterFn)
+    : needs.filter(filterFn);
 
+  // ── Render ───────────────────────────────────────────────────────
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
+    <div style={{ color: '#1e293b', fontFamily: 'Inter, sans-serif' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Community Needs</h1>
-          <p className="text-gray-500 text-sm">{needs.length} total needs tracked</p>
+          <h1 style={{ fontWeight: 800, fontSize: '1.6rem', color: '#0f172a', marginBottom: '0.2rem' }}>
+            {isAdmin ? '📋 All Needs' : '📋 My NGO Tasks'}
+          </h1>
+          <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+            {isAdmin ? `${needs.length} needs · Click a row to view Task Trail`
+              : `${assignedNeeds.length} assigned · Click row for Task Trail`}
+          </p>
         </div>
-        <div className="flex gap-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input
-              className="pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white w-64 transition-all"
-              placeholder="Search by category, location..."
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-          </div>
+        <div style={{ position: 'relative' }}>
+          <Search style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} size={16} />
+          <input
+            value={filter} onChange={e => setFilter(e.target.value)}
+            placeholder="Search needs…"
+            style={{ paddingLeft: '2.25rem', paddingRight: '1rem', paddingTop: '0.6rem', paddingBottom: '0.6rem', border: '1.5px solid #e2e8f0', borderRadius: '10px', fontFamily: 'inherit', fontSize: '0.875rem', outline: 'none', minWidth: '220px' }}
+          />
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-gray-50 border-b border-gray-100">
-            <tr>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">ID</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Category</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Location</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Urgency</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">People</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Priority</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Status / Assigned To</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
-                  No needs found. Upload a report to get started.
-                </td>
+      {/* NGO Tabs */}
+      {isNgo && (
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: 0 }}>
+          {[['assigned', '📤 Assigned to Me', assignedNeeds.length], ['submitted', '📝 My Submitted', needs.length]].map(([tab, label, cnt]) => (
+            <button key={tab} onClick={() => setNgoTab(tab)}
+              style={{ padding: '0.6rem 1.25rem', border: 'none', borderBottom: `2px solid ${ngoTab === tab ? '#6366f1' : 'transparent'}`, background: 'none', color: ngoTab === tab ? '#6366f1' : '#64748b', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', position: 'relative', bottom: '-1px' }}>
+              {label}
+              <span style={{ marginLeft: '0.5rem', background: ngoTab === tab ? '#6366f1' : '#f1f5f9', color: ngoTab === tab ? '#fff' : '#64748b', fontSize: '0.7rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: '999px' }}>{cnt}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {loading && <p style={{ color: '#94a3b8', textAlign: 'center', padding: '3rem' }}>Loading needs…</p>}
+
+      {!loading && displayNeeds.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '16px', border: '1.5px solid #f1f5f9' }}>
+          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📭</p>
+          <p style={{ color: '#64748b' }}>No needs found.</p>
+        </div>
+      )}
+
+      {/* Needs table */}
+      {!loading && displayNeeds.length > 0 && (
+        <div style={{ background: '#fff', borderRadius: '16px', border: '1.5px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                {['#', 'Category', 'Location', 'Urgency', 'Status',
+                  isNgo && ngoTab === 'assigned' ? 'My Status' : null,
+                  'Actions'].filter(Boolean).map(h => (
+                  <th key={h} style={{ padding: '0.8rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                ))}
               </tr>
-            ) : (
-              filtered.map(need => (
-                <tr key={need.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-gray-400 font-mono">#{need.id}</td>
-                  <td className="px-6 py-4 font-medium text-gray-900 capitalize">{need.category || 'N/A'}</td>
-                  <td className="px-6 py-4 text-gray-600 text-sm">{need.location || 'Unknown'}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${urgencyBadge(need.urgency)}`}>
-                      {need.urgency}
-                    </span>
+            </thead>
+            <tbody>
+              {displayNeeds.map(need => (
+                <tr key={need.id}
+                  onClick={() => setTrailNeed({ id: need.id, title: need.category })}
+                  style={{ borderTop: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background 0.1s' }}
+                  onMouseOver={e => e.currentTarget.style.background = '#f8fafc'}
+                  onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <td style={{ padding: '0.875rem 1rem', color: '#94a3b8', fontSize: '0.82rem' }}>#{need.id}</td>
+                  <td style={{ padding: '0.875rem 1rem' }}>
+                    <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.875rem' }}>{need.category}</div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: '0.1rem', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{need.description}</div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-700 font-medium">{need.people_affected || 0}</td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm font-bold text-gray-800">{need.priority_score?.toFixed(1)}</span>
-                    <span className="text-xs text-gray-400">/100</span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col gap-1.5">
-                      <StatusBadge status={need.status} />
-                      {need.assigned_volunteer_name && (
-                        <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
-                          <span className="w-3 h-px bg-blue-300 inline-block"></span>
-                          {need.assigned_volunteer_name}
-                        </span>
+                  <td style={{ padding: '0.875rem 1rem', color: '#64748b', fontSize: '0.82rem' }}>{need.location || '—'}</td>
+                  <td style={{ padding: '0.875rem 1rem' }}><UrgencyBadge level={need.urgency} /></td>
+                  <td style={{ padding: '0.875rem 1rem' }}><StatusBadge status={need.status} /></td>
+                  {isNgo && ngoTab === 'assigned' && (
+                    <td style={{ padding: '0.875rem 1rem' }}><AssignBadge status={need.ngo_assignment_status} /></td>
+                  )}
+
+                  {/* Actions cell */}
+                  <td style={{ padding: '0.875rem 1rem' }} onClick={e => e.stopPropagation()}>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      {/* Admin: assign to NGOs */}
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={() => { setAssignModal(need); setSelectedNgos([]); setAssignNote(''); }}
+                            style={actionBtn('#3b82f6')}>
+                            <Users size={13} /> Assign NGO(s)
+                          </button>
+                          <select
+                            defaultValue=""
+                            onChange={e => e.target.value && handleStatusChange(need.id, e.target.value)}
+                            style={{ fontSize: '0.72rem', padding: '0.28rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontFamily: 'inherit', cursor: 'pointer', color: '#475569' }}
+                          >
+                            <option value="">Status…</option>
+                            {['pending','assigned','in_progress','completed'].map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
+                          </select>
+                        </>
                       )}
+
+                      {/* NGO assigned tab */}
+                      {isNgo && ngoTab === 'assigned' && (
+                        <>
+                          {need.ngo_assignment_status === 'pending' && (
+                            <>
+                              <button disabled={statusUpdating === need.id} onClick={() => handleNgoAction(need.id, 'accept')} style={actionBtn('#10b981')}>
+                                <CheckCircle size={13} /> Accept
+                              </button>
+                              <button disabled={statusUpdating === need.id} onClick={() => handleNgoAction(need.id, 'reject')} style={actionBtn('#ef4444')}>
+                                <XCircle size={13} /> Reject
+                              </button>
+                            </>
+                          )}
+                          {need.ngo_assignment_status === 'accepted' && (
+                            <>
+                              <button disabled={statusUpdating === need.id} onClick={() => handleAutoAssign(need.id)} style={actionBtn('#8b5cf6')}>
+                                <Zap size={13} /> Auto Assign
+                              </button>
+                              <button onClick={() => { setVolModal(need); setSelectedVols([]); }} style={actionBtn('#f59e0b')}>
+                                <List size={13} /> Manual Assign
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {/* Trail icon always */}
+                      <button onClick={() => setTrailNeed({ id: need.id, title: need.category })} style={{ ...actionBtn('#6366f1'), background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b' }}>
+                        <Eye size={13} /> Trail
+                      </button>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    {need.status === 'pending' ? (
-                      canMatch ? (
-                        <div className="flex justify-end gap-2">
-                           <button
-                             onClick={() => handleMatch(need.id)}
-                             disabled={matching === need.id}
-                             title="Auto-Match using AI Scoring"
-                             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm shadow-blue-600/20"
-                           >
-                             <Zap size={12} />
-                             {matching === need.id ? 'Matching...' : 'Auto Match'}
-                           </button>
-                           <button
-                             onClick={() => setManualMatchModalOpen(need.id)}
-                             disabled={matching === need.id}
-                             title="Pick Volunteer Manually"
-                             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-200 disabled:opacity-50 transition-all border border-gray-200"
-                           >
-                             Manual
-                           </button>
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-gray-50 text-gray-500 border border-gray-100">
-                          <Clock size={11} /> Awaiting Match
-                        </span>
-                      )
-                    ) : need.status === 'assigned' && canMatch ? (
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => handleUnassign(need.id)}
-                          title="Remove volunteer from this need"
-                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 transition-all border border-red-100"
-                        >
-                          <UserMinus size={12} /> Unassign
-                        </button>
-                        <button
-                          onClick={() => {
-                            handleUnassign(need.id);
-                            setTimeout(() => setManualMatchModalOpen(need.id), 500);
-                          }}
-                          title="Replace with a different volunteer"
-                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-100 transition-all border border-amber-100"
-                        >
-                          <RefreshCw size={12} /> Reassign
-                        </button>
-                      </div>
-                    ) : need.status === 'accepted' ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        <CheckCircle2 size={11} /> Volunteer Accepted
-                      </span>
-                    ) : need.status === 'in_progress' ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-                        <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping"></span>
-                        <Play size={11} /> Active Now
-                      </span>
-                    ) : need.status === 'completed' ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
-                        <CheckCheck size={11} /> Completed
-                      </span>
-                    ) : null}
-                  </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* Match Result Modal */}
-      {matchResult && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl animate-slide-up">
-            <div className="flex justify-between items-start mb-6">
-              <div className="w-14 h-14 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
-                <CheckCircle2 size={28} />
-              </div>
-              <button onClick={() => setMatchResult(null)} className="text-gray-400 hover:text-gray-600">
-                <X size={20} />
+      {/* ── ADMIN: Assign to NGOs modal ───────────────────────────── */}
+      {assignModal && (
+        <div style={modalOverlay} onClick={() => setAssignModal(null)}>
+          <div style={modalBox} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontWeight: 800, fontSize: '1.1rem', marginBottom: '0.25rem', color: '#0f172a' }}>Assign Need to NGO(s)</h3>
+            <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1.25rem' }}>
+              Need #{assignModal.id} · {assignModal.category} · <UrgencyBadge level={assignModal.urgency} />
+            </p>
+
+            <p style={{ fontWeight: 600, fontSize: '0.78rem', color: '#475569', marginBottom: '0.5rem' }}>Select NGO(s) to assign:</p>
+            <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1.5px solid #e2e8f0', borderRadius: '10px', marginBottom: '1rem' }}>
+              {ngoOptions.map(n => (
+                <label key={n.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
+                  onMouseOver={e => e.currentTarget.style.background = '#f8fafc'}
+                  onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                  <input type="checkbox" checked={selectedNgos.includes(n.id)} onChange={e => setSelectedNgos(prev => e.target.checked ? [...prev, n.id] : prev.filter(id => id !== n.id))} />
+                  <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>{n.name}</span>
+                </label>
+              ))}
+              {ngoOptions.length === 0 && <p style={{ padding: '1rem', color: '#94a3b8', fontSize: '0.82rem' }}>No approved NGOs found.</p>}
+            </div>
+
+            <label style={{ display: 'block', fontWeight: 600, fontSize: '0.78rem', color: '#475569', marginBottom: '0.4rem' }}>Admin Note (optional)</label>
+            <input value={assignNote} onChange={e => setAssignNote(e.target.value)} placeholder="Instructions for NGO…"
+              style={{ width: '100%', padding: '0.625rem 0.875rem', border: '1.5px solid #e2e8f0', borderRadius: '8px', fontSize: '0.875rem', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', marginBottom: '1.25rem' }} />
+
+            <div style={{ display: 'flex', gap: '0.625rem', justifyContent: 'flex-end' }}>
+              <button onClick={() => setAssignModal(null)} style={cancelBtn}>Cancel</button>
+              <button onClick={handleAssignNgos} disabled={assigning || !selectedNgos.length} style={{ ...primaryBtn('#3b82f6'), opacity: (!selectedNgos.length || assigning) ? 0.6 : 1 }}>
+                {assigning ? 'Assigning…' : `Assign to ${selectedNgos.length} NGO(s)`}
               </button>
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Volunteer Matched!</h3>
-            <p className="text-gray-500 mb-6">{matchResult.message}</p>
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="p-4 bg-gray-50 rounded-xl text-center">
-                <p className="text-xs text-gray-400 uppercase font-bold mb-1">Volunteer</p>
-                <p className="text-lg font-bold text-gray-900">{matchResult.volunteer_name}</p>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-xl text-center">
-                <p className="text-xs text-gray-400 uppercase font-bold mb-1">Match Score</p>
-                <p className="text-lg font-bold text-blue-600">{(matchResult.match_score * 100).toFixed(1)}%</p>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-xl text-center">
-                <p className="text-xs text-gray-400 uppercase font-bold mb-1">Distance</p>
-                <p className="text-lg font-bold text-gray-900">{matchResult.distance_km?.toFixed(1)} km</p>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-xl text-center">
-                <p className="text-xs text-gray-400 uppercase font-bold mb-1">Skill Match</p>
-                <p className="text-lg font-bold text-green-600">{(matchResult.skill_match * 100).toFixed(1)}%</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setMatchResult(null)}
-              className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
-            >
-              Done
-            </button>
           </div>
         </div>
       )}
 
-      {/* Manual Match Modal */}
-      {manualMatchModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-gray-900">Manual Assign</h3>
-              <button 
-                onClick={() => {
-                  setManualMatchModalOpen(null); 
-                  setSelectedVolunteer('');
-                }} 
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X size={20} />
+      {/* ── NGO: Volunteer assign modal ───────────────────────────── */}
+      {volModal && (
+        <div style={modalOverlay} onClick={() => setVolModal(null)}>
+          <div style={modalBox} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontWeight: 800, fontSize: '1.1rem', marginBottom: '0.25rem', color: '#0f172a' }}>Assign Volunteers</h3>
+            <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1.25rem' }}>
+              Need #{volModal.id} · {volModal.category} — Select one or more volunteers (team assignment)
+            </p>
+
+            <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1.5px solid #e2e8f0', borderRadius: '10px', marginBottom: '1.25rem' }}>
+              {myVolunteers.filter(v => v.availability).map(v => (
+                <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
+                  onMouseOver={e => e.currentTarget.style.background = '#f8fafc'}
+                  onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                  <input type="checkbox" checked={selectedVols.includes(v.id)} onChange={e => setSelectedVols(prev => e.target.checked ? [...prev, v.id] : prev.filter(id => id !== v.id))} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{v.name}</div>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{(v.skills || []).join(', ')}</div>
+                  </div>
+                </label>
+              ))}
+              {myVolunteers.filter(v => v.availability).length === 0 && (
+                <p style={{ padding: '1.25rem', color: '#94a3b8', fontSize: '0.82rem', textAlign: 'center' }}>No available volunteers in your NGO.</p>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.625rem', justifyContent: 'flex-end' }}>
+              <button onClick={() => setVolModal(null)} style={cancelBtn}>Cancel</button>
+              <button onClick={handleVolAssign} disabled={assigningVols || !selectedVols.length} style={{ ...primaryBtn('#f59e0b'), opacity: (!selectedVols.length || assigningVols) ? 0.6 : 1 }}>
+                {assigningVols ? 'Assigning…' : `Assign ${selectedVols.length} Volunteer(s)`}
               </button>
             </div>
-            <p className="text-sm text-gray-500 mb-6">Select from currently available volunteers.</p>
-            <form onSubmit={handleManualMatch} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Pick Volunteer</label>
-                <select 
-                  required 
-                  value={selectedVolunteer} 
-                  onChange={e => setSelectedVolunteer(e.target.value)} 
-                  className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="" disabled>Select...</option>
-                  {volunteers.map(v => (
-                    <option key={v.id} value={v.id}>{v.name} ({v.skills?.join(', ') || 'no skills'})</option>
-                  ))}
-                </select>
-              </div>
-              <button type="submit" disabled={matching || !selectedVolunteer} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 mt-2">
-                {matching ? 'Assigning...' : 'Assign User'}
-              </button>
-            </form>
           </div>
         </div>
+      )}
+
+      {/* ── Task Trail Panel ──────────────────────────────────────── */}
+      {trailNeed && (
+        <TaskTrailPanel needId={trailNeed.id} needTitle={trailNeed.title} onClose={() => setTrailNeed(null)} />
       )}
     </div>
   );
-};
+}
 
-export default Needs;
+// ── Style helpers ─────────────────────────────────────────────────────────────
+const actionBtn = (color) => ({
+  display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+  padding: '0.3rem 0.65rem', borderRadius: '6px', border: 'none',
+  background: color + '15', color, fontWeight: 600, fontSize: '0.72rem',
+  cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.15s',
+});
+const modalOverlay = {
+  position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', zIndex: 300,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem',
+  backdropFilter: 'blur(4px)',
+};
+const modalBox = {
+  background: '#fff', borderRadius: '20px', padding: '1.75rem',
+  width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+};
+const cancelBtn = {
+  padding: '0.6rem 1.25rem', border: '1.5px solid #e2e8f0', background: '#fff',
+  borderRadius: '10px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit', color: '#64748b',
+};
+const primaryBtn = (color) => ({
+  padding: '0.6rem 1.25rem', border: 'none', background: color,
+  borderRadius: '10px', fontWeight: 700, fontSize: '0.875rem',
+  cursor: 'pointer', fontFamily: 'inherit', color: '#fff',
+});

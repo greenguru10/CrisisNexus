@@ -1,7 +1,6 @@
 """
 Need routes – Upload reports and list needs.
-Supports both raw text and file uploads (PDF, DOCX, TXT).
-Uses the ASYNC hybrid NLP pipeline (Rule-based + Groq LLM + OpenCage geocoding).
+Updated: tags ngo_id on created needs; adds Admin-push and NGO accept/reject endpoints.
 """
 
 import logging
@@ -12,72 +11,54 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.need import Need, UrgencyLevel, NeedStatus
+from models.ngo import NGO, NgoStatus
+from models.user import User, UserRole
 from schemas.need_schema import ReportUpload, NeedResponse
 from services.nlp_service import extract_from_text_async
 from services.priority_service import compute_priority_score
+from dependencies.auth_dependency import get_current_user, get_current_admin, get_current_ngo_coordinator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Needs"])
 
 
-# ── Helpers for text extraction from files ───────────────────────
+# ── File text extraction helpers ─────────────────────────────────
 
 def _extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extract text from a PDF file using PyPDF2."""
     try:
         from PyPDF2 import PdfReader
         reader = PdfReader(io.BytesIO(file_bytes))
-        text_parts = []
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text_parts.append(page_text)
-        return "\n".join(text_parts)
+        return "\n".join(p.extract_text() for p in reader.pages if p.extract_text())
     except ImportError:
-        raise HTTPException(
-            status_code=500,
-            detail="PyPDF2 is not installed. Run: pip install PyPDF2"
-        )
+        raise HTTPException(status_code=500, detail="PyPDF2 not installed. Run: pip install PyPDF2")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read PDF: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to read PDF: {e}")
 
 
 def _extract_text_from_docx(file_bytes: bytes) -> str:
-    """Extract text from a DOCX file using python-docx."""
     try:
         from docx import Document
         doc = Document(io.BytesIO(file_bytes))
-        return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     except ImportError:
-        raise HTTPException(
-            status_code=500,
-            detail="python-docx is not installed. Run: pip install python-docx"
-        )
+        raise HTTPException(status_code=500, detail="python-docx not installed.")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read DOCX: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to read DOCX: {e}")
 
 
-async def _process_and_store_need(raw_text: str, db: Session) -> Need:
-    """
-    Shared logic: Hybrid NLP pipeline → priority → store in DB.
-    """
+async def _process_and_store_need(raw_text: str, db: Session, ngo_id: Optional[int] = None) -> Need:
+    """Shared NLP pipeline → priority → DB. Accepts optional ngo_id for scoping."""
     extracted = await extract_from_text_async(raw_text)
 
-    # Convert array of categories to comma-separated string
-    categories = extracted.get("categories", ["general"])
-    if not categories:
-        categories = ["general"]
-    
+    categories = extracted.get("categories", ["general"]) or ["general"]
     category_str = ", ".join(categories)
 
-    # 2. Compute priority score
     priority = compute_priority_score(
         urgency=extracted["urgency"],
         people_affected=extracted["people_affected"],
         category=category_str,
     )
 
-    # 3. Persist to database
     need = Need(
         raw_text=raw_text,
         category=category_str,
@@ -88,53 +69,40 @@ async def _process_and_store_need(raw_text: str, db: Session) -> Need:
         longitude=extracted.get("longitude"),
         priority_score=priority,
         status=NeedStatus.PENDING,
+        ngo_id=ngo_id,          # ← tag to owning NGO
     )
     db.add(need)
     db.commit()
     db.refresh(need)
 
     logger.info(
-        "Created need id=%d category=%s urgency=%s people=%d location=%s "
-        "lat=%.4f lon=%.4f priority=%.2f confidence=%d",
+        "Created need id=%d category=%s urgency=%s people=%d ngo_id=%s priority=%.2f",
         need.id, need.category, need.urgency.value, need.people_affected,
-        need.location or "unknown",
-        need.latitude or 0, need.longitude or 0,
-        need.priority_score, extracted.get("confidence", 0),
+        ngo_id, need.priority_score,
     )
-
     return need
 
 
-# ── Endpoints ────────────────────────────────────────────────────
+# ── Upload endpoints ─────────────────────────────────────────────
 
 @router.post("/upload-report", response_model=NeedResponse, status_code=201)
 async def upload_report(
     payload: ReportUpload,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Accept a raw NGO survey report as **text**, process it through the
-    hybrid NLP pipeline (Rule-based + Groq LLM + Geocoding),
-    compute priority score, and store the structured need.
-
-    **Sample request body:**
-    ```json
-    {
-        "raw_text": "Urgent: 200 families in Kathmandu need clean drinking water and medical supplies immediately."
-    }
-    ```
-
-    **Pipeline:**
-    1. Preprocessing (slang expansion, cleanup)
-    2. Summarization (for long text)
-    3. Rule-based extraction (category, urgency, people count)
-    4. Groq LLM extraction (structured JSON)
-    5. Location extraction (LLM + spaCy NER + city fallback)
-    6. OpenCage geocoding (lat/lon)
-    7. Merge + fallback defaults
+    Accept a raw survey report as text, process through hybrid NLP pipeline.
+    Automatically tags the need to the uploader's NGO (if NGO coordinator).
     """
-    need = await _process_and_store_need(payload.raw_text, db)
+    ngo_id = None
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if ngo:
+            ngo_id = ngo.id
+
+    need = await _process_and_store_need(payload.raw_text, db, ngo_id=ngo_id)
     background_tasks.add_task(_log_new_need, need.id, need.category)
     return need
 
@@ -142,65 +110,69 @@ async def upload_report(
 @router.post("/upload-file", response_model=NeedResponse, status_code=201)
 async def upload_file(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="Upload a PDF, DOCX, or TXT report file"),
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Upload an NGO survey report as a **file** (PDF, DOCX, or TXT).
-    The text is extracted from the file, then processed through the hybrid NLP pipeline.
-
-    **Supported formats:** `.pdf`, `.docx`, `.txt`
-    """
-    # Validate file type
+    """Upload PDF/DOCX/TXT report — same NLP pipeline as upload-report."""
     filename = file.filename or ""
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
     if extension not in ("pdf", "docx", "txt"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type '.{extension}'. Accepted: .pdf, .docx, .txt"
-        )
+        raise HTTPException(status_code=400, detail=f"Unsupported type '.{extension}'")
 
-    # Read file bytes
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    # Extract text based on file type
     if extension == "pdf":
         raw_text = _extract_text_from_pdf(file_bytes)
     elif extension == "docx":
         raw_text = _extract_text_from_docx(file_bytes)
-    else:  # txt
+    else:
         raw_text = file_bytes.decode("utf-8", errors="ignore")
 
     if not raw_text or len(raw_text.strip()) < 10:
-        raise HTTPException(status_code=400, detail="Could not extract enough text from the file")
+        raise HTTPException(status_code=400, detail="Could not extract enough text from file")
 
-    logger.info("Extracted %d characters from '%s'", len(raw_text), filename)
+    ngo_id = None
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if ngo:
+            ngo_id = ngo.id
 
-    need = await _process_and_store_need(raw_text, db)
+    need = await _process_and_store_need(raw_text, db, ngo_id=ngo_id)
     background_tasks.add_task(_log_new_need, need.id, need.category)
     return need
 
 
+# ── List / Get needs ─────────────────────────────────────────────
+
 @router.get("/needs", response_model=List[NeedResponse])
 def list_needs(
-    status: Optional[str] = Query(None, description="Filter by status: pending, assigned, completed"),
-    category: Optional[str] = Query(None, description="Filter by category"),
-    urgency: Optional[str] = Query(None, description="Filter by urgency: low, medium, high"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(50, ge=1, le=200, description="Max records to return"),
+    status: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    urgency: Optional[str] = Query(None),
+    ngo_id: Optional[int] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    List all needs with optional filters.
-    Sorted by priority_score descending (highest priority first).
+    List needs. NGO coordinators automatically see only their NGO's needs.
+    Admin can optionally filter by ngo_id.
     """
     from models.volunteer import Volunteer
 
-    query = db.query(Need)
+    # Scope NGO coordinator to their own needs
+    scope_ngo_id = ngo_id
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        scope_ngo_id = ngo.id if ngo else -1  # -1 returns nothing if no NGO found
 
+    query = db.query(Need)
+    if scope_ngo_id is not None:
+        query = query.filter(Need.ngo_id == scope_ngo_id)
     if status:
         query = query.filter(Need.status == status)
     if category:
@@ -210,7 +182,6 @@ def list_needs(
 
     needs = query.order_by(Need.priority_score.desc()).offset(skip).limit(limit).all()
 
-    # Enrich with volunteer names
     results = []
     for need in needs:
         data = NeedResponse.model_validate(need)
@@ -219,7 +190,6 @@ def list_needs(
             if vol:
                 data.assigned_volunteer_name = vol.name
         results.append(data)
-
     return results
 
 
@@ -228,12 +198,295 @@ def get_need(need_id: int, db: Session = Depends(get_db)):
     """Get a single need by ID."""
     need = db.query(Need).filter(Need.id == need_id).first()
     if not need:
-        raise HTTPException(status_code=404, detail=f"Need with id {need_id} not found")
+        raise HTTPException(status_code=404, detail=f"Need {need_id} not found")
     return need
 
 
-# ── Background task helper ───────────────────────────────────────
+# ── Admin: Push task to a specific NGO ──────────────────────────
+
+@router.post("/admin/needs/{need_id}/assign-to-ngo")
+def admin_push_task_to_ngo(
+    need_id: int,
+    ngo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """[ADMIN] Assign/push an existing need to a specific NGO for handling."""
+    need = db.query(Need).filter(Need.id == need_id).first()
+    if not need:
+        raise HTTPException(status_code=404, detail="Need not found")
+
+    ngo = db.query(NGO).filter(NGO.id == ngo_id, NGO.status == NgoStatus.APPROVED).first()
+    if not ngo:
+        raise HTTPException(status_code=404, detail="Approved NGO not found")
+
+    need.ngo_id = ngo_id
+    need.assigned_by_admin = True
+    need.ngo_accepted = None  # Reset to pending NGO decision
+    db.commit()
+
+    logger.info("Admin %s pushed need %d to NGO %d (%s)", current_user.email, need_id, ngo_id, ngo.name)
+    return {"message": f"Need {need_id} assigned to NGO '{ngo.name}'. Awaiting coordinator acceptance."}
+
+
+# ── NGO Coordinator: Accept/Reject admin-pushed task ────────────
+
+@router.post("/needs/{need_id}/ngo-accept")
+def ngo_accept_task(
+    need_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ngo_coordinator),
+):
+    """[NGO Coordinator] Accept a task that Admin pushed to this NGO."""
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+    need = db.query(Need).filter(Need.id == need_id, Need.ngo_id == ngo.id).first()
+    if not need:
+        raise HTTPException(status_code=404, detail="Need not found for your NGO")
+    if not need.assigned_by_admin:
+        raise HTTPException(status_code=400, detail="This task was not pushed by Admin")
+
+    need.ngo_accepted = True
+    db.commit()
+    logger.info("NGO %s accepted task %d", ngo.name, need_id)
+    return {"message": f"Task {need_id} accepted by {ngo.name}"}
+
+
+@router.post("/needs/{need_id}/ngo-reject")
+def ngo_reject_task(
+    need_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ngo_coordinator),
+):
+    """[NGO Coordinator] Reject a task pushed by Admin. Task returns to global pending."""
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+    need = db.query(Need).filter(Need.id == need_id, Need.ngo_id == ngo.id).first()
+    if not need:
+        raise HTTPException(status_code=404, detail="Need not found for your NGO")
+
+    need.ngo_accepted = False
+    need.ngo_id = None          # Disassociate from NGO, returns to Admin pool
+    need.assigned_by_admin = False
+    need.status = NeedStatus.PENDING
+    db.commit()
+    logger.info("NGO %s rejected task %d — returned to global pending", ngo.name, need_id)
+    return {"message": f"Task {need_id} rejected. Returned to Admin for re-assignment."}
+
+
+# ── Background helper ────────────────────────────────────────────
 
 def _log_new_need(need_id: int, category: str):
-    """Background task to log need creation (extendable for notifications)."""
     logger.info("[BG] New need recorded: id=%d category=%s", need_id, category)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 2 — Multi-NGO assignment & volunteer assignment
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from pydantic import BaseModel as _BM
+from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
+from models.need_volunteer_assignment import NeedVolunteerAssignment
+from models.task_trail import TrailAction
+from services.trail_service import add_trail_entry
+
+
+class AssignNgosIn(_BM):
+    ngo_ids: List[int]
+    note: Optional[str] = None
+
+
+class AssignVolunteersIn(_BM):
+    volunteer_ids: List[int]
+
+
+# ── Admin: assign need to multiple NGOs ─────────────────────────
+@router.post("/admin/needs/{need_id}/assign-to-ngos")
+def assign_need_to_ngos(
+    need_id: int,
+    body: AssignNgosIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Admin assigns a need to one or more NGOs (parallel collaborative response)."""
+    need = db.query(Need).filter(Need.id == need_id).first()
+    if not need:
+        raise HTTPException(status_code=404, detail="Need not found")
+    if not body.ngo_ids:
+        raise HTTPException(status_code=422, detail="Provide at least one ngo_id")
+
+    ngo_names = []
+    for ngo_id in body.ngo_ids:
+        ngo = db.query(NGO).filter(NGO.id == ngo_id, NGO.status == NgoStatus.APPROVED).first()
+        if not ngo:
+            raise HTTPException(status_code=404, detail=f"NGO {ngo_id} not found or not approved")
+        # Upsert assignment (idempotent)
+        existing = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo_id).first()
+        if not existing:
+            db.add(NeedNGOAssignment(need_id=need_id, ngo_id=ngo_id, admin_note=body.note))
+        ngo_names.append(ngo.name)
+
+    # Update need
+    need.assigned_by_admin = True
+    need.status = NeedStatus.ASSIGNED if need.status == NeedStatus.PENDING else need.status
+
+    add_trail_entry(
+        db, need_id=need_id, action=TrailAction.ASSIGNED_TO_NGO,
+        actor_id=current_user.id, actor_role="admin", actor_name=current_user.email,
+        detail={"ngo_ids": body.ngo_ids, "ngo_names": ngo_names, "note": body.note or ""},
+    )
+    db.commit()
+    return {"message": f"Need {need_id} assigned to {len(body.ngo_ids)} NGO(s)", "ngo_names": ngo_names}
+
+
+# ── GET NGO-assigned needs list (for NGO dashboard) ─────────────
+@router.get("/ngo/needs/assigned")
+def get_assigned_needs_for_ngo(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ngo_coordinator),
+):
+    """Returns all needs assigned to the current NGO coordinator's NGO."""
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+    if not ngo:
+        raise HTTPException(status_code=404, detail="NGO not found")
+
+    assignments = (
+        db.query(NeedNGOAssignment)
+        .filter(NeedNGOAssignment.ngo_id == ngo.id)
+        .all()
+    )
+    need_ids = [a.need_id for a in assignments]
+    status_map = {a.need_id: a.status.value for a in assignments}
+
+    needs = db.query(Need).filter(Need.id.in_(need_ids)).all() if need_ids else []
+    result = []
+    for n in needs:
+        d = n.__dict__.copy()
+        d.pop("_sa_instance_state", None)
+        d["ngo_assignment_status"] = status_map.get(n.id)
+        result.append(d)
+    return result
+
+
+# ── NGO: accept assigned need ────────────────────────────────────
+@router.post("/ngo/needs/{need_id}/accept-assignment")
+def ngo_accept_assignment(
+    need_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ngo_coordinator),
+):
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+    assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo.id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No assignment found for your NGO")
+
+    from datetime import datetime, timezone
+    assignment.status = NgoAssignStatus.ACCEPTED
+    assignment.resolved_at = datetime.now(timezone.utc)
+
+    add_trail_entry(
+        db, need_id=need_id, action=TrailAction.NGO_ACCEPTED,
+        actor_id=current_user.id, actor_role="ngo", actor_name=ngo.name,
+        detail={"ngo_id": ngo.id, "ngo_name": ngo.name},
+    )
+    db.commit()
+    return {"message": "Assignment accepted"}
+
+
+# ── NGO: reject assigned need ────────────────────────────────────
+@router.post("/ngo/needs/{need_id}/reject-assignment")
+def ngo_reject_assignment(
+    need_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ngo_coordinator),
+):
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+    assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo.id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No assignment found for your NGO")
+
+    from datetime import datetime, timezone
+    assignment.status = NgoAssignStatus.REJECTED
+    assignment.resolved_at = datetime.now(timezone.utc)
+
+    add_trail_entry(
+        db, need_id=need_id, action=TrailAction.NGO_REJECTED,
+        actor_id=current_user.id, actor_role="ngo", actor_name=ngo.name,
+        detail={"ngo_id": ngo.id, "ngo_name": ngo.name},
+    )
+    db.commit()
+    return {"message": "Assignment rejected"}
+
+
+# ── NGO: assign multiple volunteers to a need ────────────────────
+@router.post("/ngo/needs/{need_id}/assign-volunteers")
+def ngo_assign_volunteers(
+    need_id: int,
+    body: AssignVolunteersIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ngo_coordinator),
+):
+    """NGO manually assigns one or more volunteers to an accepted need (team assignment)."""
+    from models.volunteer import Volunteer
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+
+    # Must be accepted by this NGO
+    assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo.id, status="accepted").first()
+    if not assignment:
+        raise HTTPException(status_code=400, detail="Accept the task first before assigning volunteers")
+
+    volunteer_names = []
+    for vol_id in body.volunteer_ids:
+        vol = db.query(Volunteer).filter(Volunteer.id == vol_id, Volunteer.ngo_id == ngo.id).first()
+        if not vol:
+            continue
+        exists = db.query(NeedVolunteerAssignment).filter_by(
+            need_id=need_id, volunteer_id=vol_id, ngo_id=ngo.id, is_active=True
+        ).first()
+        if not exists:
+            db.add(NeedVolunteerAssignment(
+                need_id=need_id, volunteer_id=vol_id, ngo_id=ngo.id,
+                assigned_by_id=current_user.id,
+            ))
+        volunteer_names.append(vol.name or f"Vol#{vol_id}")
+
+    add_trail_entry(
+        db, need_id=need_id, action=TrailAction.VOLUNTEER_ASSIGNED,
+        actor_id=current_user.id, actor_role="ngo", actor_name=ngo.name,
+        detail={"volunteer_ids": body.volunteer_ids, "volunteer_names": volunteer_names, "ngo_name": ngo.name},
+    )
+
+    need = db.query(Need).filter(Need.id == need_id).first()
+    if need and need.status in (NeedStatus.PENDING, NeedStatus.ASSIGNED):
+        need.status = NeedStatus.IN_PROGRESS
+    db.commit()
+    return {"message": f"{len(volunteer_names)} volunteer(s) assigned", "names": volunteer_names}
+
+
+# ── GET per-need NGO assignment summary (for trail / admin view) ─
+@router.get("/admin/needs/{need_id}/assignments")
+def get_need_assignments(
+    need_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Returns the NGO assignment records + volunteer assignments for a need."""
+    ngo_assignments = db.query(NeedNGOAssignment).filter_by(need_id=need_id).all()
+    vol_assignments = db.query(NeedVolunteerAssignment).filter_by(need_id=need_id, is_active=True).all()
+
+    from models.volunteer import Volunteer
+    result_ngos = []
+    for a in ngo_assignments:
+        ngo = db.query(NGO).filter(NGO.id == a.ngo_id).first()
+        result_ngos.append({
+            "ngo_id": a.ngo_id, "ngo_name": ngo.name if ngo else "?",
+            "status": a.status.value, "assigned_at": a.assigned_at.isoformat() if a.assigned_at else None,
+        })
+    result_vols = []
+    for v in vol_assignments:
+        vol = db.query(Volunteer).filter(Volunteer.id == v.volunteer_id).first()
+        ngo = db.query(NGO).filter(NGO.id == v.ngo_id).first()
+        result_vols.append({
+            "volunteer_id": v.volunteer_id, "name": vol.name if vol else "?",
+            "ngo_name": ngo.name if ngo else "?", "assigned_at": v.assigned_at.isoformat() if v.assigned_at else None,
+        })
+    return {"ngo_assignments": result_ngos, "volunteer_assignments": result_vols}
+

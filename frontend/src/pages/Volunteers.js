@@ -12,11 +12,14 @@ const Volunteers = () => {
 
   const role = localStorage.getItem('role');
   const isAdmin = role === 'admin';
+  const isNgo = role === 'ngo';
 
   // Forms
   const [newVolEmail, setNewVolEmail] = useState('');
   const [newVolMobile, setNewVolMobile] = useState('');
   const [newVolSkills, setNewVolSkills] = useState('');
+  const [newVolNgoId, setNewVolNgoId] = useState('');
+  const [ngoOptions, setNgoOptions] = useState([]);
   const [saving, setSaving] = useState(false);
 
   // Action loading states
@@ -25,7 +28,13 @@ const Volunteers = () => {
 
   useEffect(() => {
     fetchVolunteers();
-    if (isAdmin) fetchPending();
+    if (isAdmin || isNgo) {
+      fetchPending();
+    }
+    if (isAdmin) {
+      // Fetch NGO list for volunteer creation (admin only — NGO auto-assigned)
+      api.get('/api/ngo/names').then(r => setNgoOptions(r.data)).catch(() => {});
+    }
   }, []);
 
   const fetchVolunteers = async () => {
@@ -53,11 +62,17 @@ const Volunteers = () => {
     setSaving(true);
     try {
       const skillsArray = newVolSkills.split(',').map(s => s.trim()).filter(s => s);
-      await api.post('/api/volunteer', { email: newVolEmail, mobile_number: newVolMobile, skills: skillsArray });
+      await api.post('/api/volunteer', {
+        email: newVolEmail,
+        mobile_number: newVolMobile,
+        skills: skillsArray,
+        ngo_id: newVolNgoId ? parseInt(newVolNgoId) : undefined,
+      });
       setCreateModalOpen(false);
       setNewVolEmail('');
       setNewVolMobile('');
       setNewVolSkills('');
+      setNewVolNgoId('');
       fetchVolunteers();
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to create volunteer');
@@ -138,7 +153,7 @@ const Volunteers = () => {
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
-          {isAdmin && (
+          {(isAdmin || isNgo) && (
             <button
               onClick={() => setCreateModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition"
@@ -149,8 +164,8 @@ const Volunteers = () => {
         </div>
       </div>
 
-      {/* TABS — Approved / Pending (Admin only) */}
-      {isAdmin && (
+      {/* TABS — Approved / Pending (Admin + NGO) */}
+      {(isAdmin || isNgo) && (
         <div className="flex gap-2 border-b border-gray-200 pb-0">
           <button
             onClick={() => setActiveTab('approved')}
@@ -321,6 +336,23 @@ const Volunteers = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
                 <input type="tel" placeholder="+1234567890" value={newVolMobile} onChange={e => setNewVolMobile(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
+              {isAdmin && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Assign to NGO *</label>
+                  <select required value={newVolNgoId} onChange={e => setNewVolNgoId(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Select an NGO…</option>
+                    {ngoOptions.map(n => (
+                      <option key={n.id} value={n.id}>{n.name}</option>
+                    ))}
+                  </select>
+                  {ngoOptions.length === 0 && <p className="text-xs text-amber-600 mt-1">No approved NGOs yet.</p>}
+                </div>
+              )}
+              {isNgo && (
+                <div className="px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-sm text-blue-700">
+                  Volunteer will be auto-assigned to your NGO.
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Skills (comma separated)</label>
                 <input type="text" required placeholder="medical, driving" value={newVolSkills} onChange={e => setNewVolSkills(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
