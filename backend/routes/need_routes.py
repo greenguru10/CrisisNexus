@@ -60,24 +60,27 @@ def _extract_text_from_docx(file_bytes: bytes) -> str:
 async def _process_and_store_need(raw_text: str, db: Session) -> Need:
     """
     Shared logic: Hybrid NLP pipeline → priority → store in DB.
-
-    Uses the ASYNC hybrid pipeline:
-      Preprocess → Summarize → Rule-based → Groq LLM → Geocoding → Merge → Fallback
     """
-    # 1. Full hybrid NLP extraction (async)
     extracted = await extract_from_text_async(raw_text)
+
+    # Convert array of categories to comma-separated string
+    categories = extracted.get("categories", ["general"])
+    if not categories:
+        categories = ["general"]
+    
+    category_str = ", ".join(categories)
 
     # 2. Compute priority score
     priority = compute_priority_score(
         urgency=extracted["urgency"],
         people_affected=extracted["people_affected"],
-        category=extracted["category"],
+        category=category_str,
     )
 
     # 3. Persist to database
     need = Need(
         raw_text=raw_text,
-        category=extracted["category"],
+        category=category_str,
         urgency=UrgencyLevel(extracted["urgency"]),
         people_affected=extracted["people_affected"],
         location=extracted.get("location"),
@@ -98,6 +101,7 @@ async def _process_and_store_need(raw_text: str, db: Session) -> Need:
         need.latitude or 0, need.longitude or 0,
         need.priority_score, extracted.get("confidence", 0),
     )
+
     return need
 
 

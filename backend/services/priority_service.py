@@ -51,7 +51,10 @@ def compute_priority_score(
         Float score clamped to [0, 100], rounded to 2 decimals.
     """
     urgency_w = URGENCY_WEIGHTS.get(urgency, 0.3)
-    category_w = CATEGORY_WEIGHTS.get(category, 0.3)
+    
+    cats = [c.strip() for c in category.split(",")]
+    category_w = max([CATEGORY_WEIGHTS.get(c, 0.3) for c in cats]) if cats else 0.3
+    
     people_factor = min(1.0, max(0, people_affected) / 1000.0)
 
     score = (urgency_w * 40) + (people_factor * 40) + (category_w * 20)

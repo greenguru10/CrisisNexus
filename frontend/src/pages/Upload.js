@@ -137,10 +137,13 @@ const Upload = () => {
       {/* Result */}
       {result && (
         <div className="bg-white rounded-xl border border-green-100 shadow-sm p-6 animate-slide-up">
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3 mb-6">
             <CheckCircle className="text-green-600" size={24} />
-            <h3 className="text-lg font-semibold text-gray-900">Report Processed Successfully</h3>
+            <h3 className="text-lg font-semibold text-gray-900">
+              Report Processed Successfully!
+            </h3>
           </div>
+          
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div className="p-3 bg-gray-50 rounded-lg">
               <p className="text-xs text-gray-400 uppercase font-bold">Category</p>

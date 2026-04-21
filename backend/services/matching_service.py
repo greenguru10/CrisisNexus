@@ -54,7 +54,10 @@ def find_best_volunteer(
     best: Optional[Dict] = None
     best_score = -1.0
 
-    relevant_skills = set(CATEGORY_SKILL_MAP.get(need.category, CATEGORY_SKILL_MAP["general"]))
+    need_cats = [c.strip() for c in need.category.split(",")]
+    relevant_skills = set()
+    for cat in need_cats:
+        relevant_skills.update(CATEGORY_SKILL_MAP.get(cat, CATEGORY_SKILL_MAP["general"]))
 
     for vol in volunteers:
         # Availability Score: 1.0 if available, 0.2 if busy (but still considered)

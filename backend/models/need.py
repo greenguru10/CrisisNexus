@@ -31,7 +31,7 @@ class Need(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     raw_text = Column(Text, nullable=False, comment="Original unstructured survey report text")
-    category = Column(String(50), nullable=False, index=True, comment="E.g. food, medical, water, shelter")
+    category = Column(String(255), nullable=False, index=True, comment="E.g. food, medical, water, shelter")
     urgency = Column(SAEnum(UrgencyLevel), nullable=False, default=UrgencyLevel.MEDIUM, index=True)
     people_affected = Column(Integer, nullable=False, default=0)
     location = Column(String(255), nullable=True, comment="Human-readable location name")

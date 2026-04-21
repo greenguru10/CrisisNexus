@@ -198,10 +198,11 @@ def _preprocess_text(raw_text: str) -> str:
 # 4. LENGTH HANDLING / SUMMARIZATION
 # ═══════════════════════════════════════════════════════════════════
 
-def _summarize_long_text(text: str, max_sentences: int = 4) -> str:
+def _summarize_long_text(text: str, max_sentences: int = 6) -> str:
     """
-    For long texts, extract the top 2-4 most meaningful sentences.
-    Scores sentences by keyword density (disaster-related terms).
+    For long texts, extract the most meaningful sentences.
+    Always preserves the first 2 sentences (location/context) and
+    scores remaining sentences by keyword density.
     """
     # If short enough, return as-is
     if len(text) < 500:
@@ -212,7 +213,12 @@ def _summarize_long_text(text: str, max_sentences: int = 4) -> str:
     if len(sentences) <= max_sentences:
         return text
 
-    # Score each sentence by disaster keyword density
+    # Always keep the first 2 sentences (they almost always contain location
+    # and situational context in crisis reports)
+    preserved = sentences[:2]
+    remaining = sentences[2:]
+
+    # Score remaining sentences by disaster keyword density
     disaster_keywords = set()
     for kw_list in CATEGORY_KEYWORDS.values():
         disaster_keywords.update(kw_list)
@@ -220,7 +226,7 @@ def _summarize_long_text(text: str, max_sentences: int = 4) -> str:
     disaster_keywords.update(URGENCY_MEDIUM_KEYWORDS)
 
     scored = []
-    for s in sentences:
+    for s in remaining:
         words = s.lower().split()
         score = sum(1 for w in words if w in disaster_keywords)
         # Bonus for sentences with numbers (likely people counts)
@@ -228,13 +234,15 @@ def _summarize_long_text(text: str, max_sentences: int = 4) -> str:
             score += 2
         scored.append((score, s))
 
-    # Sort by score descending, pick top sentences
+    # Sort by score descending, pick top sentences to fill remaining slots
     scored.sort(key=lambda x: x[0], reverse=True)
-    top = [s for _, s in scored[:max_sentences]]
+    slots_left = max(1, max_sentences - len(preserved))
+    top_remaining = [s for _, s in scored[:slots_left]]
 
-    summarized = ' '.join(top)
-    logger.debug("Summarized %d sentences -> %d (input: %d chars -> %d chars)",
-                 len(sentences), len(top), len(text), len(summarized))
+    summarized = ' '.join(preserved + top_remaining)
+    logger.debug("Summarized %d sentences -> %d (preserved first 2 + %d top, %d chars -> %d chars)",
+                 len(sentences), len(preserved) + len(top_remaining),
+                 len(top_remaining), len(text), len(summarized))
     return summarized
 
 
@@ -308,25 +316,7 @@ def _extract_people_count(preprocessed: str) -> int:
     return 5
 
 
-def _extract_location_rulebased(raw_text: str) -> Optional[str]:
-    """
-    Extract location using spaCy NER (GPE/LOC entities).
-    Falls back to matching against known city coordinates.
-    """
-    if SPACY_AVAILABLE and nlp is not None:
-        doc = nlp(raw_text)
-        locations = [ent.text for ent in doc.ents if ent.label_ in ("GPE", "LOC")]
-        if locations:
-            return locations[0]
 
-    # Rule-based fallback
-    from utils.location_utils import CITY_COORDS
-    text_lower = raw_text.lower()
-    for city in CITY_COORDS:
-        if city in text_lower:
-            return city.title()
-
-    return None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -401,16 +391,8 @@ def _merge_results(rule_result: dict, llm_result: Optional[dict]) -> dict:
 
     merged["description"] = llm_desc or ""
 
-    # ── Location ──
-    llm_location = None
-    if llm_result and llm_result.get("location"):
-        loc = str(llm_result["location"]).strip()
-        if loc.lower() not in ("", "unknown", "not mentioned", "n/a", "none", "null"):
-            llm_location = loc
-
-    rule_location = rule_result.get("location")
-
-    merged["location"] = llm_location or rule_location
+    # Location handled externally by location_service now
+    merged["location"] = rule_result.get("location")
 
     # ── Confidence ──
     if llm_result and llm_cats:
@@ -500,7 +482,7 @@ async def extract_from_text_async(raw_text: str) -> dict:
         "categories": _detect_categories(preprocessed),
         "urgency":    _detect_urgency(preprocessed),
         "people_affected": _extract_people_count(preprocessed),
-        "location":   _extract_location_rulebased(raw_text),
+        "location":   None,
     }
     logger.info("Rule-based extraction: %s", rule_result)
 
@@ -508,7 +490,7 @@ async def extract_from_text_async(raw_text: str) -> dict:
     llm_result = None
     try:
         from services.llm_service import llm_extract
-        llm_result = await llm_extract(summarized)
+        llm_result = await llm_extract(preprocessed)
         if llm_result:
             logger.info("LLM extraction succeeded.")
         else:
@@ -518,6 +500,14 @@ async def extract_from_text_async(raw_text: str) -> dict:
 
     # ── Step 5: Merge results ──
     merged = _merge_results(rule_result, llm_result)
+
+    # ── Step 5b: Location Service (uses LLM data, NO extra Groq call) ──
+    from services.location_service import extract_and_enrich_location
+    llm_area = llm_result.get("location_area", "") if llm_result else ""
+    llm_city = llm_result.get("location_city", "") if llm_result else ""
+    smart_location = await extract_and_enrich_location(raw_text, llm_area, llm_city)
+    if smart_location != "unknown":
+        merged["location"] = smart_location
 
     # ── Step 6: Geocoding ──
     lat, lon = None, None
@@ -571,7 +561,10 @@ def extract_from_text(raw_text: str) -> dict:
     categories = _detect_categories(summarized)
     urgency = _detect_urgency(summarized)
     people_affected = _extract_people_count(summarized)
-    location = _extract_location_rulebased(raw_text)
+    
+    # Sync fallback does not support the new async location_service API.
+    # It will fallback to "unknown".
+    location = None
 
     result = {
         "category":        categories[0] if categories else "general",

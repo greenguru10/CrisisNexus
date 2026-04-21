@@ -50,16 +50,19 @@ From the following report text, extract these fields:
 - people_count: the estimated number of people affected (integer). If not clear, estimate based on context.
 - urgency: the urgency level (low, medium, or high)
 - description: a concise 1-2 line summary of the situation
-- location: the specific location/place mentioned in the text. Extract city, district, village, or region names.
+- location_area: the specific area, neighbourhood, suburb, or locality mentioned (e.g. "Govandi", "Dharavi"). Return "" if not found.
+- location_city: the city, town, or district mentioned (e.g. "Mumbai", "Delhi"). Return "" if not found.
 
 IMPORTANT RULES:
 1. Return ONLY valid JSON, no markdown, no backticks, no explanation.
 2. If a field is unclear, make your best estimate.
 3. For categories, always return a list even if only one category.
-4. For location, extract the most specific place name mentioned.
+4. For location, extract the MOST COMPLETE location possible. Ignore noise words like 'near', 'maybe', 'around', 'side', 'area'.
+5. If both area and city exist, return BOTH. Do NOT combine them into one field.
+6. Do NOT hallucinate locations that are not mentioned or implied.
 
 Return ONLY this JSON structure:
-{"categories": [], "people_count": 0, "urgency": "", "description": "", "location": ""}"""
+{"categories": [], "people_count": 0, "urgency": "", "description": "", "location_area": "", "location_city": ""}"""
 
 
 # ── Public API ───────────────────────────────────────────────────
@@ -133,9 +136,9 @@ def _sync_groq_call(client, text: str) -> Optional[dict]:
             return None
 
         logger.info(
-            "LLM extraction successful: categories=%s, people=%s, urgency=%s, location=%s",
+            "LLM extraction successful: categories=%s, people=%s, urgency=%s, loc_area=%s, loc_city=%s",
             parsed.get("categories"), parsed.get("people_count"),
-            parsed.get("urgency"), parsed.get("location"),
+            parsed.get("urgency"), parsed.get("location_area"), parsed.get("location_city"),
         )
         return parsed
 
