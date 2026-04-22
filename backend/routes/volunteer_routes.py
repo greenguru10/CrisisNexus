@@ -6,15 +6,17 @@ add volunteers directly to their NGO, and view only their NGO's pool.
 
 import logging
 from typing import Optional, List
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, status
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import User, UserRole, AccountStatus
-from models.volunteer import Volunteer
+from models.volunteer import Volunteer, VolunteerApprovalStatus
 from models.ngo import NGO, NgoStatus
 from schemas.volunteer_schema import (
     VolunteerCreate, VolunteerUpdate, VolunteerResponse, AdminVolunteerCreate,
+    VolunteerApprovalRequest, VolunteerRejectionRequest,
 )
 from dependencies.auth_dependency import get_current_user, get_current_admin, get_current_admin_or_ngo
 
@@ -27,7 +29,7 @@ router = APIRouter(tags=["Volunteers"])
 def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
     """
     Build a VolunteerResponse-compatible dict by merging the volunteer
-    record with its linked User's account_status.
+    record with its linked User's account_status and approval details.
     """
     vol_dict = {
         "id": volunteer.id,
@@ -45,6 +47,9 @@ def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
         "created_at": volunteer.created_at,
         "updated_at": volunteer.updated_at,
         "account_status": None,
+        "approval_status": volunteer.approval_status.value if volunteer.approval_status else None,
+        "approval_notes": volunteer.approval_notes,
+        "approved_at": volunteer.approved_at,
     }
     if volunteer.email:
         user = db.query(User).filter(User.email == volunteer.email).first()
@@ -106,7 +111,8 @@ def list_volunteers(
     current_user: User = Depends(get_current_user),
 ):
     """
-    List approved volunteers.
+    List approved volunteers (User account status = APPROVED).
+    Shows volunteers whose User is approved AND volunteer approval_status is APPROVED.
     - Admin: all approved volunteers; can filter by ngo_id.
     - NGO Coordinator: only their own NGO's volunteers.
     """
@@ -115,6 +121,7 @@ def list_volunteers(
         .join(User, User.email == Volunteer.email)
         .filter(User.role == UserRole.VOLUNTEER)
         .filter(User.account_status == AccountStatus.APPROVED)
+        .filter(Volunteer.approval_status == VolunteerApprovalStatus.APPROVED)
     )
 
     # Scope to NGO
@@ -147,17 +154,17 @@ def list_pending_volunteers(
     List pending volunteers.
     - Admin: all pending volunteers system-wide.
     - NGO Coordinator: only pending volunteers for their own NGO.
+    
+    Note: This endpoint checks Volunteer.approval_status == PENDING (new workflow).
     """
-    query = (
-        db.query(Volunteer)
-        .join(User, User.email == Volunteer.email)
-        .filter(User.role == UserRole.VOLUNTEER)
-        .filter(User.account_status == AccountStatus.PENDING)
-    )
+    query = db.query(Volunteer).filter(Volunteer.approval_status == VolunteerApprovalStatus.PENDING)
+    
     if current_user.role == UserRole.NGO:
         ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
-        scope_id = ngo.id if ngo else -1
-        query = query.filter(Volunteer.ngo_id == scope_id)
+        if not ngo:
+            raise HTTPException(status_code=403, detail="No NGO associated with your account")
+        query = query.filter(Volunteer.ngo_id == ngo.id)
+    
     pending_volunteers = query.order_by(Volunteer.created_at.desc()).all()
     return [_enrich_volunteer_response(v, db) for v in pending_volunteers]
 
@@ -261,6 +268,62 @@ def remove_volunteer_from_ngo(
     return {"message": f"Volunteer {volunteer.name} removed from NGO id={ngo_id}"}
 
 
+@router.delete("/ngo/{ngo_id}/volunteer/{volunteer_id}", status_code=status.HTTP_200_OK)
+def ngo_delete_volunteer(
+    ngo_id: int, volunteer_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_or_ngo),
+):
+    """
+    **[ADMIN / NGO COORDINATOR]** Delete/trash a volunteer from this NGO.
+    
+    - Admin: can delete any volunteer.
+    - NGO Coordinator: can only delete volunteers from their own NGO.
+    
+    This permanently deletes the volunteer and their login account.
+    The email becomes available for re-registration.
+    """
+    # NGO scope check
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo or ngo.id != ngo_id:
+            raise HTTPException(status_code=403, detail="Access denied - not your NGO")
+    
+    # Find volunteer - must belong to this NGO
+    volunteer = db.query(Volunteer).filter(
+        Volunteer.id == volunteer_id, 
+        Volunteer.ngo_id == ngo_id
+    ).first()
+    if not volunteer:
+        raise HTTPException(status_code=404, detail="Volunteer not found in this NGO")
+    
+    vol_name = volunteer.name
+    vol_email = volunteer.email
+    
+    # Delete login account (User record) so email is freed up
+    if volunteer.email:
+        user_record = db.query(User).filter(User.email == volunteer.email).first()
+        if user_record:
+            db.delete(user_record)
+            logger.info("%s deleted user account for volunteer email=%s", current_user.email, volunteer.email)
+    
+    # Delete volunteer profile
+    db.delete(volunteer)
+    db.commit()
+    
+    logger.info(
+        "%s (role=%s) deleted volunteer id=%d (name=%s, email=%s) from NGO id=%d",
+        current_user.email, current_user.role.value, volunteer_id, vol_name, vol_email, ngo_id
+    )
+    
+    return {
+        "message": f"Volunteer {vol_name} has been permanently deleted from NGO id={ngo_id}",
+        "volunteer_id": volunteer_id,
+        "volunteer_name": vol_name,
+        "volunteer_email": vol_email,
+    }
+
+
 # ── Admin-Only CRUD Endpoints ───────────────────────────────────
 
 import secrets
@@ -292,6 +355,8 @@ def admin_create_volunteer(
         if not ngo:
             raise HTTPException(status_code=403, detail="No NGO associated with your account")
         ngo_id_val = ngo.id
+    elif current_user.role == UserRole.ADMIN and not ngo_id_val:
+        raise HTTPException(status_code=400, detail="NGO ID is required when Admin creates a volunteer")
 
     # 3. Generate random password
     temp_password = secrets.token_urlsafe(12)
@@ -308,6 +373,7 @@ def admin_create_volunteer(
     db.flush()
 
     # 5. Create Volunteer profile linked by email
+    # Auto-approved since admin/ngo is creating (not requiring coordinator approval)
     volunteer = Volunteer(
         name=payload.email.split('@')[0],  # Generic name initially
         email=payload.email,
@@ -315,6 +381,9 @@ def admin_create_volunteer(
         skills=payload.skills,
         availability=True,
         ngo_id=ngo_id_val,
+        approval_status=VolunteerApprovalStatus.APPROVED,
+        approved_by_user_id=current_user.id,
+        approved_at=datetime.utcnow(),
     )
     db.add(volunteer)
     db.commit()
@@ -391,3 +460,232 @@ def delete_volunteer(
 
     logger.info("Admin %s deleted volunteer id=%d", current_user.email, volunteer_id)
     return None
+
+
+# ── NGO Coordinator Approval Endpoints ──────────────────────────────────
+
+@router.get("/ngo/volunteers/pending-approval", response_model=List[VolunteerResponse])
+def list_pending_approval_volunteers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_or_ngo),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    **[ADMIN / NGO COORDINATOR]** List volunteers pending approval by coordinator.
+    - Admin: all pending volunteers system-wide.
+    - NGO Coordinator: only volunteers in their NGO pending approval.
+    """
+    query = db.query(Volunteer).filter(Volunteer.approval_status == VolunteerApprovalStatus.PENDING)
+    
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo:
+            raise HTTPException(status_code=403, detail="No NGO associated with your account")
+        query = query.filter(Volunteer.ngo_id == ngo.id)
+    
+    volunteers = query.order_by(Volunteer.created_at.desc()).offset(skip).limit(limit).all()
+    return [_enrich_volunteer_response(v, db) for v in volunteers]
+
+
+@router.post("/ngo/volunteer/{volunteer_id}/approve", status_code=status.HTTP_200_OK)
+def ngo_approve_volunteer(
+    volunteer_id: int,
+    payload: VolunteerApprovalRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_or_ngo),
+):
+    """
+    **[ADMIN / NGO COORDINATOR]** Approve a pending volunteer.
+    
+    - Admin: can approve any volunteer.
+    - NGO Coordinator: can only approve volunteers in their own NGO.
+    
+    **Privileges:**
+    - Volunteer becomes active immediately after approval
+    - Volunteer can receive task assignments
+    - Notifications sent to volunteer
+    
+    **Request body:**
+    ```json
+    {
+        "notes": "Verified background and skills. Ready to deploy."
+    }
+    ```
+    """
+    volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
+    if not volunteer:
+        raise HTTPException(status_code=404, detail=f"Volunteer {volunteer_id} not found")
+    
+    # NGO coordinator scope check
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo or volunteer.ngo_id != ngo.id:
+            raise HTTPException(status_code=403, detail="Volunteer does not belong to your NGO")
+    
+    # Check status
+    if volunteer.approval_status != VolunteerApprovalStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Volunteer is already {volunteer.approval_status}. Cannot approve."
+        )
+    
+    # Update approval status on volunteer
+    volunteer.approval_status = VolunteerApprovalStatus.APPROVED
+    volunteer.approved_by_user_id = current_user.id
+    volunteer.approval_notes = payload.notes or ""
+    volunteer.approved_at = datetime.utcnow()
+    
+    # Also update User account_status to APPROVED
+    user = db.query(User).filter(User.email == volunteer.email).first()
+    if user:
+        user.account_status = AccountStatus.APPROVED
+    
+    db.commit()
+    
+    logger.info(
+        "%s (role=%s) approved volunteer id=%d. Notes: %s",
+        current_user.email, current_user.role.value, volunteer_id, payload.notes
+    )
+    
+    # Send approval email
+    if volunteer.email:
+        from services.email_service import send_onboarding_email
+        background_tasks.add_task(send_onboarding_email, volunteer.name, volunteer.email)
+    
+    return {
+        "message": f"Volunteer {volunteer.name} approved successfully",
+        "volunteer_id": volunteer_id,
+        "approval_status": VolunteerApprovalStatus.APPROVED.value,
+        "approved_at": volunteer.approved_at,
+    }
+
+
+@router.post("/ngo/volunteer/{volunteer_id}/reject", status_code=status.HTTP_200_OK)
+def ngo_reject_volunteer(
+    volunteer_id: int,
+    payload: VolunteerRejectionRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_or_ngo),
+):
+    """
+    **[ADMIN / NGO COORDINATOR]** Reject a pending volunteer.
+    
+    - Admin: can reject any volunteer.
+    - NGO Coordinator: can only reject volunteers in their own NGO.
+    
+    **Privileges:**
+    - Volunteer cannot receive task assignments
+    - Rejection reason visible to volunteer
+    - Volunteer can reapply after changes
+    
+    **Request body:**
+    ```json
+    {
+        "notes": "Insufficient experience in required skills. Reapply after 3 months."
+    }
+    ```
+    """
+    volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
+    if not volunteer:
+        raise HTTPException(status_code=404, detail=f"Volunteer {volunteer_id} not found")
+    
+    # NGO coordinator scope check
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo or volunteer.ngo_id != ngo.id:
+            raise HTTPException(status_code=403, detail="Volunteer does not belong to your NGO")
+    
+    # Check status
+    if volunteer.approval_status != VolunteerApprovalStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Volunteer is already {volunteer.approval_status}. Cannot reject."
+        )
+    
+    # Update rejection status on volunteer
+    volunteer.approval_status = VolunteerApprovalStatus.REJECTED
+    volunteer.approved_by_user_id = current_user.id
+    volunteer.approval_notes = payload.notes  # Rejection reason
+    volunteer.approved_at = datetime.utcnow()
+    
+    # Also update User account_status to REJECTED
+    user = db.query(User).filter(User.email == volunteer.email).first()
+    if user:
+        user.account_status = AccountStatus.REJECTED
+    
+    db.commit()
+    
+    logger.info(
+        "%s (role=%s) rejected volunteer id=%d. Reason: %s",
+        current_user.email, current_user.role.value, volunteer_id, payload.notes
+    )
+    
+    # Send rejection email with reason
+    if volunteer.email:
+        from services.email_service import send_volunteer_rejection_email
+        background_tasks.add_task(
+            send_volunteer_rejection_email, volunteer.name, volunteer.email, payload.notes
+        )
+    
+    return {
+        "message": f"Volunteer {volunteer.name} rejected",
+        "volunteer_id": volunteer_id,
+        "approval_status": VolunteerApprovalStatus.REJECTED.value,
+        "rejection_reason": payload.notes,
+        "approved_at": volunteer.approved_at,
+    }
+
+
+@router.get("/ngo/volunteer/{volunteer_id}/approval-status", status_code=status.HTTP_200_OK)
+def get_volunteer_approval_status(
+    volunteer_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_or_ngo),
+):
+    """
+    **[ADMIN / NGO COORDINATOR]** Get volunteer approval status and history.
+    
+    Returns:
+    - Approval status (pending/approved/rejected)
+    - Approval notes/reason
+    - Approved/rejected by whom and when
+    - Privileges based on status
+    """
+    volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
+    if not volunteer:
+        raise HTTPException(status_code=404, detail=f"Volunteer {volunteer_id} not found")
+    
+    # NGO coordinator scope check
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo or volunteer.ngo_id != ngo.id:
+            raise HTTPException(status_code=403, detail="Volunteer does not belong to your NGO")
+    
+    approved_by = None
+    if volunteer.approved_by_user_id:
+        approver = db.query(User).filter(User.id == volunteer.approved_by_user_id).first()
+        approved_by = approver.email if approver else None
+    
+    # Determine privileges based on status
+    privileges = []
+    if volunteer.approval_status == VolunteerApprovalStatus.APPROVED:
+        privileges = [
+            "receive_task_assignments",
+            "view_needs",
+            "submit_task_completion",
+            "earn_badges",
+        ]
+    
+    return {
+        "volunteer_id": volunteer_id,
+        "volunteer_name": volunteer.name,
+        "approval_status": volunteer.approval_status.value,
+        "approval_notes": volunteer.approval_notes,
+        "approved_by": approved_by,
+        "approved_at": volunteer.approved_at,
+        "privileges": privileges,
+        "ngo_id": volunteer.ngo_id,
+    }

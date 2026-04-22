@@ -9,6 +9,7 @@ const Volunteers = () => {
   const [filter, setFilter] = useState('');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('approved'); // 'approved' | 'pending'
+  const [currentNgoId, setCurrentNgoId] = useState(null); // For NGO coordinators
 
   const role = localStorage.getItem('role');
   const isAdmin = role === 'admin';
@@ -25,6 +26,11 @@ const Volunteers = () => {
   // Action loading states
   const [approvingId, setApprovingId] = useState(null);
   const [rejectingId, setRejectingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [approvalModal, setApprovalModal] = useState({ open: false, volunteerId: null, name: '' });
+  const [rejectionModal, setRejectionModal] = useState({ open: false, volunteerId: null, name: '' });
+  const [approvalNotes, setApprovalNotes] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
 
   useEffect(() => {
     fetchVolunteers();
@@ -34,6 +40,12 @@ const Volunteers = () => {
     if (isAdmin) {
       // Fetch NGO list for volunteer creation (admin only — NGO auto-assigned)
       api.get('/api/ngo/names').then(r => setNgoOptions(r.data)).catch(() => {});
+    }
+    // Fetch NGO ID for NGO coordinators
+    if (isNgo) {
+      api.get('/api/ngo/me/details').then(r => {
+        if (r.data?.id) setCurrentNgoId(r.data.id);
+      }).catch(err => console.error('Failed to fetch NGO profile:', err));
     }
   }, []);
 
@@ -50,7 +62,7 @@ const Volunteers = () => {
 
   const fetchPending = async () => {
     try {
-      const { data } = await api.get('/api/volunteers/pending');
+      const { data } = await api.get('/api/ngo/volunteers/pending-approval');
       setPendingVolunteers(data);
     } catch (err) {
       console.error('Failed to fetch pending volunteers:', err);
@@ -74,6 +86,7 @@ const Volunteers = () => {
       setNewVolSkills('');
       setNewVolNgoId('');
       fetchVolunteers();
+      fetchPending();
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to create volunteer');
     } finally {
@@ -81,21 +94,32 @@ const Volunteers = () => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this volunteer? This action cannot be undone.')) return;
+  const handleDelete = async (id, vol) => {
+    if (!window.confirm(`Are you sure you want to permanently delete ${vol.name}? This action cannot be undone.`)) return;
+    
+    setDeletingId(id);
     try {
-      await api.delete(`/api/volunteer/${id}`);
+      const actualNgoId = currentNgoId || localStorage.getItem('ngo_id');
+      if (isNgo && actualNgoId) {
+        // NGO-scoped delete endpoint
+        await api.delete(`/api/ngo/${actualNgoId}/volunteer/${id}`);
+      } else {
+        // Admin delete endpoint
+        await api.delete(`/api/volunteer/${id}`);
+      }
       fetchVolunteers();
       fetchPending();
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to delete volunteer');
+    } finally {
+      setDeletingId(null);
     }
   };
 
-  const handleApprove = async (id) => {
+  const handleApprove = async (id, notes = '') => {
     setApprovingId(id);
     try {
-      await api.post(`/api/volunteer/${id}/approve`);
+      await api.post(`/api/ngo/volunteer/${id}/approve`, { notes });
       // Move from pending to approved
       fetchVolunteers();
       fetchPending();
@@ -106,11 +130,14 @@ const Volunteers = () => {
     }
   };
 
-  const handleReject = async (id) => {
-    if (!window.confirm('Are you sure you want to reject this volunteer?')) return;
+  const handleReject = async (id, reason = '') => {
+    if (!reason) {
+      alert('Please provide a rejection reason');
+      return;
+    }
     setRejectingId(id);
     try {
-      await api.post(`/api/volunteer/${id}/reject`);
+      await api.post(`/api/ngo/volunteer/${id}/reject`, { notes: reason });
       fetchPending();
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to reject volunteer');
@@ -212,11 +239,13 @@ const Volunteers = () => {
             <div key={vol.id} className={`bg-white rounded-xl border shadow-sm p-6 relative hover:shadow-md transition-shadow group ${
               activeTab === 'pending' ? 'border-amber-200' : 'border-gray-100'
             }`}>
-              {/* Delete button (admin, approved tab only) */}
-              {isAdmin && activeTab === 'approved' && (
+              {/* Delete button (admin & NGO coordinators, approved tab) */}
+              {(isAdmin || isNgo) && activeTab === 'approved' && (
                 <button 
-                  onClick={() => handleDelete(vol.id)}
-                  className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                  onClick={() => handleDelete(vol.id, vol)}
+                  disabled={deletingId === vol.id}
+                  className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                  title={isNgo ? "Delete this volunteer from your NGO" : "Delete this volunteer"}
                 >
                   <Trash size={16} />
                 </button>
@@ -288,10 +317,10 @@ const Volunteers = () => {
               </div>
 
               {/* Approve / Reject buttons (pending tab) */}
-              {isAdmin && activeTab === 'pending' && (
+              {(isAdmin || isNgo) && activeTab === 'pending' && (
                 <div className="flex gap-2 pt-3 border-t border-gray-100">
                   <button
-                    onClick={() => handleApprove(vol.id)}
+                    onClick={() => setApprovalModal({ open: true, volunteerId: vol.id, name: vol.name })}
                     disabled={approvingId === vol.id}
                     className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition disabled:opacity-50"
                   >
@@ -299,7 +328,7 @@ const Volunteers = () => {
                     {approvingId === vol.id ? 'Approving...' : 'Approve'}
                   </button>
                   <button
-                    onClick={() => handleReject(vol.id)}
+                    onClick={() => setRejectionModal({ open: true, volunteerId: vol.id, name: vol.name })}
                     disabled={rejectingId === vol.id}
                     className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-white text-red-600 text-sm font-medium rounded-lg border border-red-200 hover:bg-red-50 transition disabled:opacity-50"
                   >
@@ -365,6 +394,97 @@ const Volunteers = () => {
         </div>
       )}
 
+      {/* APPROVAL MODAL */}
+      {approvalModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Approve Volunteer</h3>
+              <button onClick={() => setApprovalModal({ ...approvalModal, open: false })} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">Approve <strong>{approvalModal.name}</strong> as a volunteer?</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Approval Notes (optional)</label>
+                <textarea 
+                  value={approvalNotes} 
+                  onChange={e => setApprovalNotes(e.target.value)}
+                  placeholder="e.g., Verified background and skills. Ready for deployment."
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-green-500 text-sm resize-none"
+                  rows="3"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setApprovalModal({ ...approvalModal, open: false })}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    handleApprove(approvalModal.volunteerId, approvalNotes);
+                    setApprovalModal({ ...approvalModal, open: false });
+                    setApprovalNotes('');
+                  }}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
+                >
+                  Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REJECTION MODAL */}
+      {rejectionModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Reject Volunteer</h3>
+              <button onClick={() => setRejectionModal({ ...rejectionModal, open: false })} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">Reject <strong>{rejectionModal.name}</strong>?</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Rejection Reason *</label>
+                <textarea 
+                  value={rejectionReason} 
+                  onChange={e => setRejectionReason(e.target.value)}
+                  placeholder="e.g., Insufficient experience. Please reapply after 3 months with updated skills."
+                  className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-sm resize-none"
+                  rows="3"
+                />
+                <p className="text-xs text-gray-500 mt-1">This reason will be sent to the volunteer</p>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setRejectionModal({ ...rejectionModal, open: false })}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    handleReject(rejectionModal.volunteerId, rejectionReason);
+                    setRejectionModal({ ...rejectionModal, open: false });
+                    setRejectionReason('');
+                  }}
+                  disabled={!rejectionReason}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition disabled:opacity-50"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

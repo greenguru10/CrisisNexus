@@ -125,7 +125,7 @@ Then run these SQL commands inside the psql prompt:
 
 ```sql
 -- Create the database
-CREATE DATABASE community_sync;
+CREATE DATABASE CommunitySync1;
 
 -- Verify it was created
 \l
@@ -164,7 +164,7 @@ Now open `.env` in any text editor and paste:
 ```env
 # ─── Database ────────────────────────────────────────────────────────────────
 # Replace YOUR_PASSWORD with your PostgreSQL password
-DATABASE_URL=postgresql+pg8000://postgres:YOUR_PASSWORD@localhost:5432/community_sync
+DATABASE_URL=postgresql+pg8000://postgres:YOUR_PASSWORD@localhost:5432/CommunitySync1
 
 # ─── Application ─────────────────────────────────────────────────────────────
 APP_TITLE=CrisisNexus API
@@ -266,41 +266,28 @@ python -m spacy download en_core_web_sm
 
 ---
 
-### Step 5 — Run Database Migrations
+### Step 5 — Initialize the Database
 
 Still inside `backend/` (with venv activated):
 
-#### 5a. Initialize base tables
+Run the master reset script to set up the entire schema from scratch with zero issues:
 
 ```bash
-python init_database.py
+python reset_db.py
 ```
 
 Expected output:
 ```
-✅ ALL DATABASE SETUP STEPS COMPLETED SUCCESSFULLY!
-🎉 Your database is ready to use!
+🧨 DATABASE RESET AND INITIALIZATION
+Dropping all existing tables to start fresh...
+✅ All tables dropped successfully.
+
+Creating all tables from current ORM models...
+✅ All tables created successfully!
+🎉 Database successfully recreated from scratch with ZERO issues!
 ```
 
-#### 5b. Run Phase 2 migration (federation tables)
-
-```bash
-python migrate_phase2.py
-```
-
-Expected output:
-```
-=== CrisisNexus Phase 2 Migration ===
-[OK] enum 'trailaction' ready
-[OK] resource_requests.need_id added (or already exists)
-[OK] table 'task_trail' created (or already exists)
-[OK] table 'need_ngo_assignments' created (or already exists)
-[OK] table 'need_volunteer_assignments' created (or already exists)
-[OK] table 'inventory_contributions' created (or already exists)
-[OK] Phase 2 migration complete!
-```
-
-> ℹ️ It is safe to run these migrations multiple times — they are idempotent.
+> ⚠️ **Warning:** Running this script will completely wipe the existing database and recreate it fresh. Do not run it if you wish to preserve the data!
 
 ---
 
@@ -507,7 +494,7 @@ CrisisNexus/
 ### ❌ `could not connect to database`
 - Make sure PostgreSQL is running
 - Check your `DATABASE_URL` in `backend/.env` — password must be correct
-- The database `community_sync` must exist (see Step 2)
+- The database `CommunitySync1` must exist (see Step 2)
 
 ### ❌ `bcrypt` / passlib error on login
 ```
@@ -554,11 +541,10 @@ lsof -ti :3000 | xargs kill -9
 - Open browser DevTools → Console for specific errors
 
 ### ❌ `relation does not exist` (DB table missing)
-Run the migrations again:
+Run the database reset script to recreate all tables correctly:
 ```bash
 cd backend
-python init_database.py
-python migrate_phase2.py
+python reset_db.py
 ```
 
 ### ❌ Volunteer tasks not appearing after NGO assigns them
@@ -575,7 +561,7 @@ git checkout phase2/federated-multi-ngo
 
 | Variable | Required | Example | Description |
 |---|---|---|---|
-| `DATABASE_URL` | ✅ Yes | `postgresql+pg8000://postgres:pass@localhost:5432/community_sync` | PostgreSQL connection string |
+| `DATABASE_URL` | ✅ Yes | `postgresql+pg8000://postgres:pass@localhost:5432/CommunitySync1` | PostgreSQL connection string |
 | `JWT_SECRET` | ✅ Yes | `my-long-random-secret` | Secret for signing JWT tokens |
 | `JWT_ALGORITHM` | ✅ Yes | `HS256` | JWT signing algorithm |
 | `JWT_EXPIRY_MINUTES` | ✅ Yes | `120` | Token validity in minutes |

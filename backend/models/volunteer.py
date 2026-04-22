@@ -2,10 +2,18 @@
 Volunteer model – represents a volunteer who can be matched to needs.
 """
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
+import enum
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum as SAEnum
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
 from database import Base
+
+
+class VolunteerApprovalStatus(str, enum.Enum):
+    """Volunteer approval status by NGO Coordinator."""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class Volunteer(Base):
@@ -26,6 +34,18 @@ class Volunteer(Base):
     # ── Multi-NGO federation fields ───────────────────────────────
     ngo_id = Column(Integer, ForeignKey("ngos.id"), nullable=True, index=True,
                     comment="Primary NGO this volunteer belongs to")
+    # ── NGO Coordinator Approval Status ───────────────────────────
+    approval_status = Column(
+        SAEnum(VolunteerApprovalStatus, values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=VolunteerApprovalStatus.PENDING,
+        index=True,
+        comment="NGO coordinator approval: pending|approved|rejected",
+    )
+    approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, 
+                                 comment="User ID of coordinator who approved/rejected")
+    approval_notes = Column(String(500), nullable=True, comment="Coordinator's approval/rejection notes")
+    approved_at = Column(DateTime(timezone=True), nullable=True, comment="When coordinator approved/rejected")
     # ── Gamification fields ───────────────────────────────────────
     tasks_completed = Column(Integer, nullable=False, default=0, comment="Total completed task count")
     consecutive_completions = Column(Integer, nullable=False, default=0,

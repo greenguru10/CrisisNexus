@@ -1,0 +1,91 @@
+{
+  "ngos": [
+    {
+      "id": 1,
+      "name": "bro_found",
+      "coord": 2
+    }
+  ],
+  "users": [
+    {
+      "id": 2,
+      "email": "vin123@gmail.com",
+      "role": "ngo",
+      "status": "approved"
+    },
+    {
+      "id": 5,
+      "email": "jay@gmail.com",
+      "role": "volunteer",
+      "status": "approved"
+    },
+    {
+      "id": 4,
+      "email": "akash@gmail.com",
+      "role": "volunteer",
+      "status": "approved"
+    },
+    {
+      "id": 3,
+      "email": "priya@gmail.com",
+      "role": "volunteer",
+      "status": "approved"
+    },
+    {
+      "id": 6,
+      "email": "ravi@gmail.com",
+      "role": "volunteer",
+      "status": "approved"
+    },
+    {
+      "id": 7,
+      "email": "jayabachan@gmai.com",
+      "role": "volunteer",
+      "status": "approved"
+    },
+    {
+      "id": 8,
+      "email": "Abhishek@gmail.com",
+      "role": "volunteer",
+      "status": "approved"
+    }
+  ],
+  "vols": [
+    {
+      "id": 3,
+      "email": "jay@gmail.com",
+      "ngo_id": null,
+      "appr": "approved"
+    },
+    {
+      "id": 2,
+      "email": "akash@gmail.com",
+      "ngo_id": 1,
+      "appr": "approved"
+    },
+    {
+      "id": 1,
+      "email": "priya@gmail.com",
+      "ngo_id": 1,
+      "appr": "approved"
+    },
+    {
+      "id": 4,
+      "email": "ravi@gmail.com",
+      "ngo_id": null,
+      "appr": "approved"
+    },
+    {
+      "id": 5,
+      "email": "jayabachan@gmai.com",
+      "ngo_id": 1,
+      "appr": "approved"
+    },
+    {
+      "id": 6,
+      "email": "Abhishek@gmail.com",
+      "ngo_id": null,
+      "appr": "approved"
+    }
+  ]
+}

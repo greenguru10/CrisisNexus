@@ -18,6 +18,7 @@ import Unauthorized from './pages/Unauthorized';
 
 // New multi-NGO pages
 import NgoManagement from './pages/NgoManagement';
+import NgoProfile from './pages/NgoProfile';
 import ResourceInventory from './pages/ResourceInventory';
 import PoolRequests from './pages/PoolRequests';
 import Analytics from './pages/Analytics';
@@ -59,6 +60,13 @@ const ProtectedLayout = () => {
             <Route path="/volunteers" element={
               <ProtectedRoute allowedRoles={['admin', 'ngo']}>
                 <Volunteers />
+              </ProtectedRoute>
+            } />
+
+            {/* ── NGO Profile ── */}
+            <Route path="/ngo-profile" element={
+              <ProtectedRoute allowedRoles={['ngo']}>
+                <NgoProfile />
               </ProtectedRoute>
             } />
 

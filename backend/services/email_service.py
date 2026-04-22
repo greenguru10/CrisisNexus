@@ -231,3 +231,43 @@ async def send_volunteer_welcome_email(name: str, email: str) -> bool:
     """
     return await send_email(email, subject, body)
 
+
+async def send_volunteer_rejection_email(name: str, email: str, reason: str) -> bool:
+    """
+    Send rejection email when a volunteer is rejected by NGO Coordinator or Admin.
+    Includes the reason for rejection so volunteer can improve and reapply.
+    """
+    subject = "CommunitySync Volunteer Application Status"
+    body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2 style="color: #2563eb;">Hello {name},</h2>
+        <p>Thank you for your interest in volunteering with <strong>CommunitySync</strong>.</p>
+
+        <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0;"><strong>Status:</strong> Application Not Approved</p>
+            <p style="margin: 10px 0 0 0;"><strong>Reason:</strong></p>
+            <p style="margin: 5px 0 0 0; font-style: italic;">{reason}</p>
+        </div>
+
+        <p>We encourage you to:</p>
+        <ul>
+            <li>Review the feedback provided above</li>
+            <li>Develop the skills or experience mentioned</li>
+            <li>Reapply once you've addressed these areas</li>
+        </ul>
+
+        <p>
+            <a href="http://localhost:3000/login"
+               style="display:inline-block; padding:10px 20px; background-color:#2563eb; color:white; text-decoration:none; border-radius:5px;">
+                Visit CommunitySync
+            </a>
+        </p>
+
+        <br/>
+        <p>We look forward to your future participation!<br/>— <strong>CommunitySync Team</strong></p>
+    </body>
+    </html>
+    """
+    return await send_email(email, subject, body)
+

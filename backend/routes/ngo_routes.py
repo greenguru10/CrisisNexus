@@ -213,3 +213,30 @@ def get_my_ngo(
     if not ngo:
         raise HTTPException(status_code=404, detail="NGO not found for this coordinator")
     return ngo
+
+
+# ── NGO Coordinator: Update my NGO ───────────────────────────────────────
+@router.put("/me/details", response_model=NgoResponse)
+def update_my_ngo(
+    payload: NgoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ngo_coordinator),
+):
+    """[NGO Coordinator] Update own NGO details (editable fields only)."""
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+    if not ngo:
+        raise HTTPException(status_code=404, detail="NGO not found for this coordinator")
+
+    # Coordinators can update these fields:
+    # - name, ngo_type, registration_number, description, location, contact_email, contact_phone
+    # They cannot change: status, coordinator_user_id, admin_notes
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "ngo_type" and value:
+            value = NgoType(value)
+        setattr(ngo, field, value)
+
+    db.commit()
+    db.refresh(ngo)
+    logger.info("NGO coordinator %s updated their NGO id=%d (%s)", current_user.email, ngo.id, ngo.name)
+    return ngo

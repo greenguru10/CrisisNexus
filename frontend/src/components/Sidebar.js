@@ -24,6 +24,9 @@ const Sidebar = () => {
     { label: 'Resources',     icon: Package,          path: '/resources',       roles: ['admin', 'ngo'] },
     { label: 'Pool Requests', icon: Share2,           path: '/pool-requests',   roles: ['admin', 'ngo'] },
 
+    // ── NGO only ─────────────────────────────────────────────────
+    { label: 'NGO Profile',   icon: Building2,        path: '/ngo-profile',     roles: ['ngo'] },
+
     // ── Admin only ───────────────────────────────────────────────
     { label: 'NGO Management',icon: Building2,        path: '/ngo-management',  roles: ['admin'] },
 
@@ -42,7 +45,7 @@ const Sidebar = () => {
   const sections = [
     { title: null,          items: navItems.filter(n => ['Dashboard','My Tasks','Upload Report'].includes(n.label)) },
     { title: 'Operations',  items: navItems.filter(n => ['Needs','Volunteers'].includes(n.label)) },
-    { title: 'Federation',  items: navItems.filter(n => ['Analytics','Resources','Pool Requests','NGO Management'].includes(n.label)) },
+    { title: 'Federation',  items: navItems.filter(n => ['Analytics','Resources','Pool Requests','NGO Management','NGO Profile'].includes(n.label)) },
     { title: 'Community',   items: navItems.filter(n => ['Leaderboard'].includes(n.label)) },
   ].filter(s => s.items.length > 0);
 

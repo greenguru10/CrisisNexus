@@ -46,6 +46,7 @@ class AdminVolunteerCreate(BaseModel):
     email: str = Field(..., description="Volunteer email for login and notifications")
     mobile_number: Optional[str] = Field(None, description="Mobile number for WhatsApp (e.g. +919876543210)")
     skills: List[str] = Field(..., min_length=1)
+    ngo_id: Optional[int] = Field(None, description="NGO ID to assign volunteer to. Ignored if coordinator creates.")
 
 class VolunteerUpdate(BaseModel):
     """Schema for admin to update a volunteer. All fields optional."""
@@ -58,6 +59,30 @@ class VolunteerUpdate(BaseModel):
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     availability: Optional[bool] = None
     rating: Optional[float] = Field(None, ge=0, le=5)
+
+
+class VolunteerApprovalRequest(BaseModel):
+    """Schema for approving a volunteer by NGO Coordinator."""
+    notes: Optional[str] = Field(None, max_length=500, description="Optional approval notes from coordinator")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "notes": "Verified skills and background. Ready to deploy.",
+            }
+        }
+
+
+class VolunteerRejectionRequest(BaseModel):
+    """Schema for rejecting a volunteer by NGO Coordinator."""
+    notes: str = Field(..., max_length=500, description="Reason for rejection (visible to volunteer)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "notes": "Insufficient experience in required skills. Please reapply after 3 months.",
+            }
+        }
 
 
 # ── Response Schemas ─────────────────────────────────────────────
@@ -74,7 +99,11 @@ class VolunteerBase(BaseModel):
     longitude: Optional[float] = None
     availability: bool
     rating: Optional[float] = None
+    ngo_id: Optional[int] = None
     account_status: Optional[str] = None
+    approval_status: Optional[str] = None
+    approval_notes: Optional[str] = None
+    approved_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
