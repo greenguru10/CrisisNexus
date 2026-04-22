@@ -15,6 +15,7 @@ from models.need import Need, UrgencyLevel, NeedStatus
 from schemas.need_schema import ReportUpload, NeedResponse
 from services.nlp_service import extract_from_text_async
 from services.priority_service import compute_priority_score
+from services.validation_service import validate_report
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Needs"])
@@ -59,8 +60,25 @@ def _extract_text_from_docx(file_bytes: bytes) -> str:
 
 async def _process_and_store_need(raw_text: str, db: Session) -> Need:
     """
-    Shared logic: Hybrid NLP pipeline → priority → store in DB.
+    Shared logic: Validation gate → Hybrid NLP pipeline → priority → store in DB.
     """
+    # ── Step 0: Validate that the text is a real community report ──
+    validation = await validate_report(raw_text)
+    if validation["status"] == "INVALID":
+        logger.warning(
+            "Report rejected by validation gate: confidence=%d reason='%s'",
+            validation["confidence"], validation["reason"],
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "Invalid report",
+                "message": f"{validation['reason']} (Extracted text: '{raw_text[:150]}...')",
+                "confidence": validation["confidence"],
+            },
+        )
+
+    # ── Step 1: Hybrid NLP pipeline (UNTOUCHED) ──
     extracted = await extract_from_text_async(raw_text)
 
     # Convert array of categories to comma-separated string
@@ -142,23 +160,38 @@ async def upload_report(
 @router.post("/upload-file", response_model=NeedResponse, status_code=201)
 async def upload_file(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="Upload a PDF, DOCX, or TXT report file"),
+    file: UploadFile = File(..., description="Upload a PDF, DOCX, TXT, or image report file"),
     db: Session = Depends(get_db),
 ):
     """
-    Upload an NGO survey report as a **file** (PDF, DOCX, or TXT).
+    Upload an NGO survey report as a **file**.
     The text is extracted from the file, then processed through the hybrid NLP pipeline.
 
-    **Supported formats:** `.pdf`, `.docx`, `.txt`
+    **Supported formats:** `.pdf`, `.docx`, `.txt`, `.jpg`, `.jpeg`, `.png`
+
+    For images and scanned PDFs, Tesseract OCR is used to extract text.
+    OCR is completely local – no LLM/Groq usage for text extraction.
+
+    **Pipeline:**
+    File → Text Extraction (+ OCR if needed) → Validation (Groq) → NLP (Groq)
     """
+    from services.ocr_service import (
+        SUPPORTED_IMAGE_EXTS,
+        extract_text_from_image,
+        extract_text_from_scanned_pdf,
+        validate_file_size,
+    )
+
+    ACCEPTED_EXTS = {"pdf", "docx", "txt"} | SUPPORTED_IMAGE_EXTS
+
     # Validate file type
     filename = file.filename or ""
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    if extension not in ("pdf", "docx", "txt"):
+    if extension not in ACCEPTED_EXTS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '.{extension}'. Accepted: .pdf, .docx, .txt"
+            detail=f"Unsupported file type '.{extension}'. Accepted: {', '.join(sorted(ACCEPTED_EXTS))}"
         )
 
     # Read file bytes
@@ -166,19 +199,52 @@ async def upload_file(
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    # Extract text based on file type
-    if extension == "pdf":
+    # Enforce file size limit
+    try:
+        validate_file_size(file_bytes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # ── Extract text based on file type ──────────────────────────
+    raw_text = ""
+
+    if extension in SUPPORTED_IMAGE_EXTS:
+        # ── Image → OCR API ──
+        try:
+            raw_text = await extract_text_from_image(file_bytes, filename)
+            logger.info("OCR extracted %d chars from image '%s'", len(raw_text), filename)
+        except (RuntimeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    elif extension == "pdf":
+        # ── PDF → try normal extraction first, OCR fallback ──
         raw_text = _extract_text_from_pdf(file_bytes)
+
+        if not raw_text or len(raw_text.strip()) < 10:
+            logger.info("PDF '%s' has no extractable text – falling back to OCR API", filename)
+            try:
+                raw_text = await extract_text_from_scanned_pdf(file_bytes, filename)
+                logger.info("OCR fallback extracted %d chars from PDF '%s'", len(raw_text), filename)
+            except (RuntimeError, ValueError) as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
     elif extension == "docx":
         raw_text = _extract_text_from_docx(file_bytes)
+
     else:  # txt
         raw_text = file_bytes.decode("utf-8", errors="ignore")
 
+    # ── Validate extracted text ──────────────────────────────────
     if not raw_text or len(raw_text.strip()) < 10:
-        raise HTTPException(status_code=400, detail="Could not extract enough text from the file")
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract enough text from the file. "
+                   "For images, ensure the text is clearly visible."
+        )
 
     logger.info("Extracted %d characters from '%s'", len(raw_text), filename)
 
+    # ── Pass to existing validation → NLP pipeline (UNTOUCHED) ──
     need = await _process_and_store_need(raw_text, db)
     background_tasks.add_task(_log_new_need, need.id, need.category)
     return need

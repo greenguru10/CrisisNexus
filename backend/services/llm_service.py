@@ -58,7 +58,7 @@ IMPORTANT RULES:
 2. If a field is unclear, make your best estimate.
 3. For categories, always return a list even if only one category.
 4. For location, extract the MOST COMPLETE location possible. Ignore noise words like 'near', 'maybe', 'around', 'side', 'area'.
-5. If both area and city exist, return BOTH. Do NOT combine them into one field.
+5. If the location is given as "Area, City" (e.g., "Govandi, Mumbai"), extract "Govandi" as location_area and "Mumbai" as location_city. DO NOT drop the city or combine them into one field.
 6. Do NOT hallucinate locations that are not mentioned or implied.
 
 Return ONLY this JSON structure:
@@ -96,7 +96,7 @@ async def llm_extract(text: str, timeout: float = 15.0) -> Optional[dict]:
         logger.warning("Groq LLM call timed out after %.1fs – falling back to rule-based.", timeout)
         return None
     except Exception as e:
-        logger.error("Groq LLM extraction failed: %s", e)
+        logger.error("Groq extraction failed: %s", e)
         return None
 
 

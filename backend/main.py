@@ -93,3 +93,4 @@ def root():
 def health_check():
     """Detailed health check."""
     return {"status": "ok", "database": "connected"}
+
