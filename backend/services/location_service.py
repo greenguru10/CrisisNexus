@@ -45,6 +45,24 @@ NOISE_LOCATION_TERMS = {
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 }
 
+# ═══════════════════════════════════════════════════════════════════
+# MAJOR CITIES FALLBACK (If LLM/spaCy fails to extract city)
+# ═══════════════════════════════════════════════════════════════════
+
+MAJOR_CITIES = {
+    "mumbai", "delhi", "bangalore", "bengaluru", "chennai", "kolkata", 
+    "hyderabad", "pune", "ahmedabad", "surat", "jaipur", "lucknow", 
+    "kanpur", "nagpur", "indore", "thane", "bhopal", "patna", "vadodara"
+}
+
+def fallback_city_extraction(text: str) -> str:
+    """Extract known major cities using regex if missing."""
+    text_lower = text.lower()
+    for city in MAJOR_CITIES:
+        if re.search(rf'\b{city}\b', text_lower):
+            return city.title()
+    return ""
+
 
 def _is_valid_location(text: str) -> bool:
     """Check if a string is a plausible location (not noise/medical term)."""
@@ -181,11 +199,16 @@ async def enrich_location_geocode(area: str, city: str) -> Dict[str, str]:
 # ═══════════════════════════════════════════════════════════════════
 
 def merge_location(area: str, city: str) -> Optional[str]:
-    """Merge area + city into a single formatted string."""
+    """Merge area + city into a single formatted string, avoiding duplicates."""
     area = area.strip()
     city = city.strip()
 
     if area and city and area.lower() != city.lower():
+        # Prevent outputs like "Govandi, Mumbai, Mumbai" if area already contains city
+        if city.lower() in area.lower():
+            return area.title()
+        if area.lower() in city.lower():
+            return city.title()
         return f"{area}, {city}".title()
     elif city:
         return city.title()
@@ -231,6 +254,10 @@ async def extract_and_enrich_location(
             spacy_result = extract_location_spacy(clean_text)
             area = spacy_result.get("area", "")
             city = spacy_result.get("city", "")
+
+    # Absolute fallback: if city is still missing, try regex lookup
+    if not city:
+        city = fallback_city_extraction(raw_text)
 
     # Enrich via OpenCage (fills missing area or city)
     if area or city:

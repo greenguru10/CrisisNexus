@@ -50,6 +50,23 @@ async def _process_and_store_need(raw_text: str, db: Session, ngo_id: Optional[i
     """Shared NLP pipeline → priority → DB. Accepts optional ngo_id for scoping."""
     from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
 
+    # ── Step 0: Validate that the text is a real community report ──
+    from services.validation_service import validate_report
+    validation = await validate_report(raw_text)
+    if validation["status"] == "INVALID":
+        logger.warning(
+            "Report rejected by validation gate: confidence=%d reason='%s'",
+            validation["confidence"], validation["reason"],
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "Invalid report",
+                "message": validation["reason"],
+                "confidence": validation["confidence"],
+            },
+        )
+
     extracted = await extract_from_text_async(raw_text)
 
     categories = extracted.get("categories", ["general"]) or ["general"]
@@ -125,18 +142,44 @@ async def upload_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Upload PDF/DOCX/TXT report — same NLP pipeline as upload-report."""
+    """Upload PDF/DOCX/TXT/IMAGE report — same NLP pipeline as upload-report."""
+    from services.ocr_service import (
+        SUPPORTED_IMAGE_EXTS,
+        extract_text_from_image,
+        extract_text_from_scanned_pdf,
+        validate_file_size,
+    )
+
+    ACCEPTED_EXTS = {"pdf", "docx", "txt"} | SUPPORTED_IMAGE_EXTS
+
     filename = file.filename or ""
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if extension not in ("pdf", "docx", "txt"):
+    if extension not in ACCEPTED_EXTS:
         raise HTTPException(status_code=400, detail=f"Unsupported type '.{extension}'")
 
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    if extension == "pdf":
+    try:
+        validate_file_size(file_bytes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    raw_text = ""
+
+    if extension in SUPPORTED_IMAGE_EXTS:
+        try:
+            raw_text = await extract_text_from_image(file_bytes, filename)
+        except (RuntimeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    elif extension == "pdf":
         raw_text = _extract_text_from_pdf(file_bytes)
+        if not raw_text or len(raw_text.strip()) < 10:
+            try:
+                raw_text = await extract_text_from_scanned_pdf(file_bytes, filename)
+            except (RuntimeError, ValueError) as e:
+                raise HTTPException(status_code=400, detail=str(e))
     elif extension == "docx":
         raw_text = _extract_text_from_docx(file_bytes)
     else:

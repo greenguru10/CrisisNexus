@@ -83,11 +83,11 @@ Ensure you have the following installed:
 ### Step 2: Database Initialization (CRITICAL)
 1.  **Create the Database**: Open your PostgreSQL terminal (psql) or PGAdmin and run:
     ```sql
-    CREATE DATABASE community_sync;
+    CREATE DATABASE community_sync3;
     ```
 2.  **Configure Env**: In `/backend`, create a `.env` file:
     ```env
-    DATABASE_URL=postgresql+pg8000://postgres:YOUR_PASSWORD@localhost:5432/community_sync
+    DATABASE_URL=postgresql+pg8000://postgres:YOUR_PASSWORD@localhost:5432/community_sync3
     JWT_SECRET=any_random_secure_string
     ```
 3.  **Run Schema Setup**: This script builds all tables, enums, and relations automatically.

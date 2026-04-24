@@ -4,7 +4,7 @@ This document outlines the complete database setup process for the CrisisNexus b
 
 ## Prerequisites
 
-- PostgreSQL database created and running (as mentioned in the terminal log: `community_sync` database)
+- PostgreSQL database created and running (as mentioned in the terminal log: `community_sync3` database)
 - Python 3.10+ with virtual environment activated
 - All dependencies installed (`pip install -r requirements.txt`)
 - `.env` file properly configured with database credentials
@@ -136,7 +136,7 @@ Error: could not connect to database
 ```
 **Solution:** Verify PostgreSQL is running and `.env` contains correct credentials:
 ```
-DATABASE_URL=postgresql+pg8000://postgres:PASSWORD@localhost:5432/community_sync
+DATABASE_URL=postgresql+pg8000://postgres:PASSWORD@localhost:5432/community_sync3
 ```
 
 ### Table Already Exists
@@ -170,7 +170,7 @@ After setup, verify the database:
 python -c "from database import SessionLocal; from models.user import User; from sqlalchemy import select; db = SessionLocal(); print([u.email for u in db.execute(select(User)).scalars()])"
 
 # Check table structure
-psql -h localhost -U postgres -d community_sync -c "\dt"
+psql -h localhost -U postgres -d community_sync3 -c "\dt"
 ```
 
 ## Starting the Server
@@ -192,7 +192,7 @@ Ensure these are set in `.env`:
 
 ```env
 # Database
-DATABASE_URL=postgresql+pg8000://postgres:PASSWORD@localhost:5432/community_sync
+DATABASE_URL=postgresql+pg8000://postgres:PASSWORD@localhost:5432/community_sync3
 
 # Application
 APP_TITLE=Smart Resource Allocation API

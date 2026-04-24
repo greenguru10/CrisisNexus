@@ -20,7 +20,8 @@ const Upload = () => {
       setResult(data);
       setRawText('');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to process report');
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'object' ? detail.message || detail.error || 'Invalid report' : detail || 'Failed to process report');
     } finally {
       setLoading(false);
     }
@@ -41,7 +42,8 @@ const Upload = () => {
       setResult(data);
       setFile(null);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to process file');
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'object' ? detail.message || detail.error || 'Invalid report' : detail || 'Failed to process file');
     } finally {
       setLoading(false);
     }
@@ -109,12 +111,12 @@ const Upload = () => {
       {/* File Mode */}
       {mode === 'file' && (
         <form onSubmit={handleFileSubmit} className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-          <label className="block text-sm font-medium text-gray-700 mb-3">Upload PDF, DOCX, or TXT</label>
+          <label className="block text-sm font-medium text-gray-700 mb-3">Upload PDF, DOCX, TXT, or Image (JPG/PNG)</label>
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center hover:border-blue-400 transition-colors">
             <UploadIcon className="mx-auto text-gray-400 mb-3" size={32} />
             <input
               type="file"
-              accept=".pdf,.docx,.txt"
+              accept=".pdf,.docx,.txt,.jpg,.jpeg,.png"
               onChange={(e) => setFile(e.target.files[0])}
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-600 file:font-medium hover:file:bg-blue-100 cursor-pointer"
             />
@@ -127,10 +129,20 @@ const Upload = () => {
           <button
             type="submit"
             disabled={loading || !file}
-            className="mt-4 px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm shadow-blue-600/20"
+            className="mt-4 w-full md:w-auto px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all shadow-sm shadow-blue-600/20"
           >
             {loading ? 'Processing...' : 'Upload & Analyze'}
           </button>
+          <div className="mt-6 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
+            <h4 className="text-sm font-semibold text-blue-800 flex items-center gap-2 mb-2">
+              <AlertTriangle size={16} /> Image Upload Tips
+            </h4>
+            <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
+              <li>Use a dark pen (avoid pencil)</li>
+              <li>Keep paper flat and unwrinkled</li>
+              <li>Ensure good lighting and avoid shadows</li>
+            </ul>
+          </div>
         </form>
       )}
 

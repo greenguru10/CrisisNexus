@@ -13,7 +13,7 @@ Your CrisisNexus database has been successfully initialized and is ready for use
 
 ### 1. ✅ Database Tables Created
 
-Three main tables have been created in the `community_sync` PostgreSQL database:
+Three main tables have been created in the `community_sync3` PostgreSQL database:
 
 | Table | Purpose | Records |
 |-------|---------|---------|
@@ -36,7 +36,7 @@ Three main tables have been created in the `community_sync` PostgreSQL database:
 ### 3. ✅ Environment Configuration
 
 Your `.env` file has been corrected with:
-- Fixed DATABASE_URL with URL-encoded password: `postgresql+pg8000://postgres:aBcd%401234@localhost:5432/community_sync`
+- Fixed DATABASE_URL with URL-encoded password: `postgresql+pg8000://postgres:aBcd%401234@localhost:5432/community_sync3`
 - All required API keys for Groq, OpenCage, Twilio, Gmail
 - JWT authentication configuration
 - CORS settings for frontend integration
@@ -183,7 +183,7 @@ pg_isready -h localhost -p 5432
 ### Issue: "password authentication failed"
 **Solution:** Verify `.env` has correct database credentials:
 ```env
-DATABASE_URL=postgresql+pg8000://postgres:aBcd%401234@localhost:5432/community_sync
+DATABASE_URL=postgresql+pg8000://postgres:aBcd%401234@localhost:5432/community_sync3
 ```
 (Note: `@` in password is URL-encoded as `%40`)
 
