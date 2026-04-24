@@ -48,6 +48,8 @@ def _extract_text_from_docx(file_bytes: bytes) -> str:
 
 async def _process_and_store_need(raw_text: str, db: Session, ngo_id: Optional[int] = None) -> Need:
     """Shared NLP pipeline → priority → DB. Accepts optional ngo_id for scoping."""
+    from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
+
     extracted = await extract_from_text_async(raw_text)
 
     categories = extracted.get("categories", ["general"]) or ["general"]
@@ -69,9 +71,18 @@ async def _process_and_store_need(raw_text: str, db: Session, ngo_id: Optional[i
         longitude=extracted.get("longitude"),
         priority_score=priority,
         status=NeedStatus.PENDING,
-        ngo_id=ngo_id,          # ← tag to owning NGO
     )
     db.add(need)
+    db.flush()  # get need.id without committing
+
+    # Tag need to owning NGO via junction table
+    if ngo_id:
+        db.add(NeedNGOAssignment(
+            need_id=need.id,
+            ngo_id=ngo_id,
+            status=NgoAssignStatus.ACCEPTED,
+        ))
+
     db.commit()
     db.refresh(need)
 
@@ -170,9 +181,17 @@ def list_needs(
         ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
         scope_ngo_id = ngo.id if ngo else -1  # -1 returns nothing if no NGO found
 
+    from models.need_ngo_assignment import NeedNGOAssignment
+    from models.volunteer import Volunteer
+
     query = db.query(Need)
     if scope_ngo_id is not None:
-        query = query.filter(Need.ngo_id == scope_ngo_id)
+        # Filter through the junction table instead of the dropped ngo_id column
+        ngo_need_ids = [
+            row.need_id for row in
+            db.query(NeedNGOAssignment.need_id).filter(NeedNGOAssignment.ngo_id == scope_ngo_id).all()
+        ]
+        query = query.filter(Need.id.in_(ngo_need_ids))
     if status:
         query = query.filter(Need.status == status)
     if category:
@@ -185,8 +204,10 @@ def list_needs(
     results = []
     for need in needs:
         data = NeedResponse.model_validate(need)
-        if need.assigned_volunteer_id:
-            vol = db.query(Volunteer).filter(Volunteer.id == need.assigned_volunteer_id).first()
+        # Populate assigned_volunteer_name if someone is assigned
+        vol_id = need.assigned_volunteer_id
+        if vol_id:
+            vol = db.query(Volunteer).filter(Volunteer.id == vol_id).first()
             if vol:
                 data.assigned_volunteer_name = vol.name
         results.append(data)
@@ -212,6 +233,8 @@ def admin_push_task_to_ngo(
     current_user: User = Depends(get_current_admin),
 ):
     """[ADMIN] Assign/push an existing need to a specific NGO for handling."""
+    from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
+
     need = db.query(Need).filter(Need.id == need_id).first()
     if not need:
         raise HTTPException(status_code=404, detail="Need not found")
@@ -220,9 +243,18 @@ def admin_push_task_to_ngo(
     if not ngo:
         raise HTTPException(status_code=404, detail="Approved NGO not found")
 
-    need.ngo_id = ngo_id
+    # Upsert NeedNGOAssignment (PENDING awaiting coordinator acceptance)
+    existing = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo_id).first()
+    if not existing:
+        db.add(NeedNGOAssignment(
+            need_id=need_id, ngo_id=ngo_id,
+            status=NgoAssignStatus.PENDING,
+        ))
+    elif existing.status == NgoAssignStatus.REJECTED:
+        existing.status = NgoAssignStatus.PENDING
+
     need.assigned_by_admin = True
-    need.ngo_accepted = None  # Reset to pending NGO decision
+    need.ngo_accepted = None  # Reset flag (legacy field kept)
     db.commit()
 
     logger.info("Admin %s pushed need %d to NGO %d (%s)", current_user.email, need_id, ngo_id, ngo.name)
@@ -238,13 +270,17 @@ def ngo_accept_task(
     current_user: User = Depends(get_current_ngo_coordinator),
 ):
     """[NGO Coordinator] Accept a task that Admin pushed to this NGO."""
+    from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
+
     ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
-    need = db.query(Need).filter(Need.id == need_id, Need.ngo_id == ngo.id).first()
-    if not need:
+    assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo.id).first()
+    need = db.query(Need).filter(Need.id == need_id).first()
+    if not need or not assignment:
         raise HTTPException(status_code=404, detail="Need not found for your NGO")
     if not need.assigned_by_admin:
         raise HTTPException(status_code=400, detail="This task was not pushed by Admin")
 
+    assignment.status = NgoAssignStatus.ACCEPTED
     need.ngo_accepted = True
     db.commit()
     logger.info("NGO %s accepted task %d", ngo.name, need_id)
@@ -258,13 +294,16 @@ def ngo_reject_task(
     current_user: User = Depends(get_current_ngo_coordinator),
 ):
     """[NGO Coordinator] Reject a task pushed by Admin. Task returns to global pending."""
+    from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
+
     ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
-    need = db.query(Need).filter(Need.id == need_id, Need.ngo_id == ngo.id).first()
-    if not need:
+    assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo.id).first()
+    need = db.query(Need).filter(Need.id == need_id).first()
+    if not need or not assignment:
         raise HTTPException(status_code=404, detail="Need not found for your NGO")
 
+    assignment.status = NgoAssignStatus.REJECTED
     need.ngo_accepted = False
-    need.ngo_id = None          # Disassociate from NGO, returns to Admin pool
     need.assigned_by_admin = False
     need.status = NeedStatus.PENDING
     db.commit()
@@ -313,15 +352,36 @@ def assign_need_to_ngos(
     if not body.ngo_ids:
         raise HTTPException(status_code=422, detail="Provide at least one ngo_id")
 
+    # Get current assignments
+    current_assignments = db.query(NeedNGOAssignment).filter(
+        NeedNGOAssignment.need_id == need_id,
+        NeedNGOAssignment.status != NgoAssignStatus.REJECTED
+    ).all()
+    
+    current_ngo_ids = {a.ngo_id for a in current_assignments}
+    new_ngo_ids = set(body.ngo_ids)
+    
+    # NGOs to remove: in current but NOT in new
+    to_remove = current_ngo_ids - new_ngo_ids
+    for ngo_id_to_rem in to_remove:
+        a = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo_id_to_rem).first()
+        if a:
+            a.status = NgoAssignStatus.REJECTED # Mark as rejected/removed so consensus ignores them
+            logger.info("Admin %s removed NGO %d from need %d during reassignment", current_user.email, ngo_id_to_rem, need_id)
+
     ngo_names = []
     for ngo_id in body.ngo_ids:
         ngo = db.query(NGO).filter(NGO.id == ngo_id, NGO.status == NgoStatus.APPROVED).first()
         if not ngo:
             raise HTTPException(status_code=404, detail=f"NGO {ngo_id} not found or not approved")
+        
         # Upsert assignment (idempotent)
         existing = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo_id).first()
         if not existing:
             db.add(NeedNGOAssignment(need_id=need_id, ngo_id=ngo_id, admin_note=body.note))
+        elif existing.status == NgoAssignStatus.REJECTED:
+            existing.status = NgoAssignStatus.PENDING # Bring back if it was removed
+            
         ngo_names.append(ngo.name)
 
     # Update need
@@ -362,6 +422,13 @@ def get_assigned_needs_for_ngo(
         d = n.__dict__.copy()
         d.pop("_sa_instance_state", None)
         d["ngo_assignment_status"] = status_map.get(n.id)
+        
+        # Check for manual team assignments
+        manual_count = db.query(NeedVolunteerAssignment).filter_by(
+            need_id=n.id, ngo_id=ngo.id, is_active=True
+        ).count()
+        d["has_manual_assignments"] = manual_count > 0
+        
         result.append(d)
     return result
 
@@ -446,6 +513,7 @@ def ngo_assign_volunteers(
                 need_id=need_id, volunteer_id=vol_id, ngo_id=ngo.id,
                 assigned_by_id=current_user.id,
             ))
+        vol.availability = False
         volunteer_names.append(vol.name or f"Vol#{vol_id}")
 
     add_trail_entry(

@@ -38,3 +38,11 @@ node_modules/
 
 # Gemini
 .gemini/
+
+# Temporary / Scratch
+backend/scratch/
+backend/venv/
+backend/output.log
+backend/init_output.txt
+backend/test_output.txt
+backend/test_scripts/

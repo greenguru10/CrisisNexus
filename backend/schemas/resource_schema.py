@@ -47,11 +47,13 @@ class ResourceResponse(BaseModel):
 # ── Resource Requests ─────────────────────────────────────────────────────
 
 class ResourceRequestCreate(BaseModel):
+    resource_inventory_id: int
     resource_type: str
     quantity_requested: float = Field(..., gt=0)
     unit: str = "units"
-    reason: str = Field(..., min_length=10)
+    reason: str = Field(..., min_length=3)
     urgency: str = "medium"
+    need_id: Optional[int] = None
 
 
 class ResourceRequestApprove(BaseModel):
@@ -73,6 +75,7 @@ class ResourceRequestResponse(BaseModel):
     reason: str
     urgency: str
     status: str
+    requested_inventory_id: Optional[int] = None
     admin_notes: Optional[str]
     allocated_resource_id: Optional[int]
     quantity_allocated: Optional[float]

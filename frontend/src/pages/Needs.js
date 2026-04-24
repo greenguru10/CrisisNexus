@@ -14,6 +14,16 @@ import {
   Zap, List, Clock, AlertTriangle, ChevronRight
 } from 'lucide-react';
 
+function TabButton({ label, count, active, onClick }) {
+  return (
+    <button onClick={onClick}
+      style={{ padding: '0.6rem 1.25rem', border: 'none', borderBottom: `2px solid ${active ? '#6366f1' : 'transparent'}`, background: 'none', color: active ? '#6366f1' : '#64748b', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', position: 'relative', bottom: '-1px' }}>
+      {label}
+      <span style={{ marginLeft: '0.5rem', background: active ? '#6366f1' : '#f1f5f9', color: active ? '#fff' : '#64748b', fontSize: '0.7rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: '999px' }}>{count}</span>
+    </button>
+  );
+}
+
 const ROLE = () => localStorage.getItem('role');
 const NGO_ID = () => localStorage.getItem('ngo_id');
 
@@ -69,7 +79,8 @@ export default function Needs() {
   const [myVolunteers, setMyVols]       = useState([]);
   const [loading, setLoading]           = useState(true);
   const [filter, setFilter]             = useState('');
-  const [ngoTab, setNgoTab]             = useState('assigned'); // 'assigned' | 'submitted'
+  const [ngoTab, setNgoTab]             = useState('active'); // 'active' | 'submitted' | 'completed'
+  const [adminTab, setAdminTab]         = useState('all'); // 'all' | 'completed'
 
   // Trail panel
   const [trailNeed, setTrailNeed]       = useState(null); // { id, title }
@@ -104,6 +115,7 @@ export default function Needs() {
           api.get('/api/ngo/needs/assigned').catch(() => ({ data: [] })),
           api.get('/api/volunteers').catch(() => ({ data: [] })),
         ]);
+        // Filter out admin-assigned needs from 'submitted' list unless it's their own
         setNeeds(allRes.data.filter(n => !n.assigned_by_admin || n.ngo_id === parseInt(NGO_ID())));
         setAssigned(assignedRes.data);
         setMyVols(volRes.data);
@@ -189,9 +201,30 @@ export default function Needs() {
     (n.location || '').toLowerCase().includes(filter.toLowerCase()) ||
     (n.description || '').toLowerCase().includes(filter.toLowerCase());
 
-  const displayNeeds = isNgo && ngoTab === 'assigned'
-    ? assignedNeeds.filter(filterFn)
-    : needs.filter(filterFn);
+  let displayNeeds = [];
+  if (isAdmin) {
+    if (adminTab === 'completed') {
+      displayNeeds = needs.filter(n => n.status === 'completed');
+    } else {
+      displayNeeds = needs.filter(n => n.status !== 'completed');
+    }
+  } else if (isNgo) {
+    if (ngoTab === 'completed') {
+      displayNeeds = [...assignedNeeds, ...needs].filter(n => n.status === 'completed');
+      // Deduplicate by ID
+      const seen = new Set();
+      displayNeeds = displayNeeds.filter(n => {
+        if (seen.has(n.id)) return false;
+        seen.add(n.id);
+        return true;
+      });
+    } else if (ngoTab === 'submitted') {
+      displayNeeds = needs.filter(n => n.status !== 'completed');
+    } else {
+      displayNeeds = assignedNeeds.filter(n => n.status !== 'completed');
+    }
+  }
+  displayNeeds = displayNeeds.filter(filterFn);
 
   // ── Render ───────────────────────────────────────────────────────
   return (
@@ -217,18 +250,25 @@ export default function Needs() {
         </div>
       </div>
 
-      {/* NGO Tabs */}
-      {isNgo && (
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: 0 }}>
-          {[['assigned', '📤 Assigned to Me', assignedNeeds.length], ['submitted', '📝 My Submitted', needs.length]].map(([tab, label, cnt]) => (
-            <button key={tab} onClick={() => setNgoTab(tab)}
-              style={{ padding: '0.6rem 1.25rem', border: 'none', borderBottom: `2px solid ${ngoTab === tab ? '#6366f1' : 'transparent'}`, background: 'none', color: ngoTab === tab ? '#6366f1' : '#64748b', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', position: 'relative', bottom: '-1px' }}>
-              {label}
-              <span style={{ marginLeft: '0.5rem', background: ngoTab === tab ? '#6366f1' : '#f1f5f9', color: ngoTab === tab ? '#fff' : '#64748b', fontSize: '0.7rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: '999px' }}>{cnt}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Tabs Row */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: 0 }}>
+        {isAdmin ? (
+          <>
+            {[['all', '📋 Active Needs', needs.filter(n => n.status !== 'completed').length], 
+              ['completed', '✅ Completed Tasks', needs.filter(n => n.status === 'completed').length]].map(([tab, label, cnt]) => (
+              <TabButton key={tab} active={adminTab === tab} onClick={() => setAdminTab(tab)} label={label} count={cnt} />
+            ))}
+          </>
+        ) : (
+          <>
+            {[['active', '📤 Assigned to Me', assignedNeeds.filter(n => n.status !== 'completed').length], 
+              ['submitted', '📝 My Submitted', needs.filter(n => n.status !== 'completed').length],
+              ['completed', '✅ Completed', [...assignedNeeds, ...needs].filter(n => n.status === 'completed').length]].map(([tab, label, cnt]) => (
+              <TabButton key={tab} active={ngoTab === tab} onClick={() => setNgoTab(tab)} label={label} count={cnt} />
+            ))}
+          </>
+        )}
+      </div>
 
       {loading && <p style={{ color: '#94a3b8', textAlign: 'center', padding: '3rem' }}>Loading needs…</p>}
 
@@ -246,7 +286,7 @@ export default function Needs() {
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 {['#', 'Category', 'Location', 'Urgency', 'Status',
-                  isNgo && ngoTab === 'assigned' ? 'My Status' : null,
+                  isNgo && (ngoTab === 'active' || ngoTab === 'completed') ? 'Assignment' : null,
                   'Actions'].filter(Boolean).map(h => (
                   <th key={h} style={{ padding: '0.8rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
@@ -268,15 +308,15 @@ export default function Needs() {
                   <td style={{ padding: '0.875rem 1rem', color: '#64748b', fontSize: '0.82rem' }}>{need.location || '—'}</td>
                   <td style={{ padding: '0.875rem 1rem' }}><UrgencyBadge level={need.urgency} /></td>
                   <td style={{ padding: '0.875rem 1rem' }}><StatusBadge status={need.status} /></td>
-                  {isNgo && ngoTab === 'assigned' && (
+                  {isNgo && (ngoTab === 'active' || ngoTab === 'completed') && (
                     <td style={{ padding: '0.875rem 1rem' }}><AssignBadge status={need.ngo_assignment_status} /></td>
                   )}
 
                   {/* Actions cell */}
                   <td style={{ padding: '0.875rem 1rem' }} onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                      {/* Admin: assign to NGOs */}
-                      {isAdmin && (
+                      {/* Admin: assign to NGOs — hidden when completed */}
+                      {isAdmin && need.status !== 'completed' && (
                         <>
                           <button
                             onClick={() => { setAssignModal(need); setSelectedNgos([]); setAssignNote(''); }}
@@ -293,9 +333,13 @@ export default function Needs() {
                           </select>
                         </>
                       )}
+                      {/* Admin: completed label */}
+                      {isAdmin && need.status === 'completed' && (
+                        <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>✅ Completed</span>
+                      )}
 
-                      {/* NGO assigned tab */}
-                      {isNgo && ngoTab === 'assigned' && (
+                      {/* NGO active tab */}
+                      {isNgo && ngoTab === 'active' && (
                         <>
                           {need.ngo_assignment_status === 'pending' && (
                             <>
@@ -307,22 +351,28 @@ export default function Needs() {
                               </button>
                             </>
                           )}
-                          {need.ngo_assignment_status === 'accepted' && (
+                          {need.ngo_assignment_status === 'accepted' && need.status !== 'completed' && (
                             <>
-                              <button disabled={statusUpdating === need.id} onClick={() => handleAutoAssign(need.id)} style={actionBtn('#8b5cf6')}>
-                                <Zap size={13} /> Auto Assign
-                              </button>
+                              {!need.has_manual_assignments && (
+                                <button disabled={statusUpdating === need.id} onClick={() => handleAutoAssign(need.id)} style={actionBtn('#8b5cf6')}>
+                                  <Zap size={13} /> Auto Assign
+                                </button>
+                              )}
                               <button onClick={() => { setVolModal(need); setSelectedVols([]); }} style={actionBtn('#f59e0b')}>
-                                <List size={13} /> Manual Assign
+                                <List size={13} /> {need.has_manual_assignments ? 'Edit Team' : 'Manual Assign'}
                               </button>
                             </>
                           )}
                         </>
                       )}
 
+                      {isNgo && ngoTab === 'completed' && (
+                         <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>✅ Completed</span>
+                      )}
+
                       {/* Trail icon always */}
                       <button onClick={() => setTrailNeed({ id: need.id, title: need.category })} style={{ ...actionBtn('#6366f1'), background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b' }}>
-                        <Eye size={13} /> Trail
+                        <Eye size={13} /> {need.status === 'completed' ? 'Details' : 'Trail'}
                       </button>
                     </div>
                   </td>

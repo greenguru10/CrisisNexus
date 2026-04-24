@@ -47,7 +47,7 @@ class ResourceInventory(Base):
     unit = Column(String(50), nullable=False, default="units", comment="kg, liters, units, sets, etc.")
     location = Column(String(255), nullable=True, comment="Storage location")
     status = Column(SAEnum(ResourceStatus, values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=ResourceStatus.AVAILABLE, index=True)
-    allocated_to_ngo_id = Column(Integer, ForeignKey("ngos.id"), nullable=True, index=True)
+    allocated_to_ngo_id = Column(Integer, ForeignKey("ngos.id", ondelete="SET NULL"), nullable=True, index=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -62,13 +62,15 @@ class ResourceRequest(Base):
     __tablename__ = "resource_requests"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    requesting_ngo_id = Column(Integer, ForeignKey("ngos.id"), nullable=False, index=True)
+    requesting_ngo_id = Column(Integer, ForeignKey("ngos.id", ondelete="CASCADE"), nullable=False, index=True)
     resource_type = Column(SAEnum(ResourceType, values_callable=lambda obj: [e.value for e in obj]), nullable=False)
     quantity_requested = Column(Float, nullable=False)
     unit = Column(String(50), nullable=False, default="units")
     reason = Column(Text, nullable=False, comment="Why they need this resource")
     urgency = Column(String(20), nullable=False, default="medium", comment="low|medium|high")
-    need_id = Column(Integer, ForeignKey("needs.id"), nullable=True, index=True,
+    requested_inventory_id = Column(Integer, ForeignKey("resource_inventory.id"), nullable=True,
+                                    comment="Which inventory item the NGO is specifically asking for")
+    need_id = Column(Integer, ForeignKey("needs.id", ondelete="SET NULL"), nullable=True, index=True,
                      comment="Task this resource is needed for (optional)")
     need_description = Column(String(255), nullable=True, comment="Denormalized task title for display")
     status = Column(SAEnum(RequestStatus, values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=RequestStatus.PENDING, index=True)

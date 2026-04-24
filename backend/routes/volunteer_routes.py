@@ -7,6 +7,7 @@ add volunteers directly to their NGO, and view only their NGO's pool.
 import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -112,7 +113,7 @@ def list_volunteers(
     """
     query = (
         db.query(Volunteer)
-        .join(User, User.email == Volunteer.email)
+        .join(User, func.lower(User.email) == func.lower(Volunteer.email))
         .filter(User.role == UserRole.VOLUNTEER)
         .filter(User.account_status == AccountStatus.APPROVED)
     )
@@ -150,7 +151,7 @@ def list_pending_volunteers(
     """
     query = (
         db.query(Volunteer)
-        .join(User, User.email == Volunteer.email)
+        .join(User, func.lower(User.email) == func.lower(Volunteer.email))
         .filter(User.role == UserRole.VOLUNTEER)
         .filter(User.account_status == AccountStatus.PENDING)
     )
@@ -158,8 +159,13 @@ def list_pending_volunteers(
         ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
         scope_id = ngo.id if ngo else -1
         query = query.filter(Volunteer.ngo_id == scope_id)
+    elif current_user.role == UserRole.ADMIN:
+        # Admin only sees volunteers who are NOT assigned to any NGO
+        query = query.filter(Volunteer.ngo_id == None)
+
     pending_volunteers = query.order_by(Volunteer.created_at.desc()).all()
     return [_enrich_volunteer_response(v, db) for v in pending_volunteers]
+
 
 
 @router.get("/volunteers/{volunteer_id}", response_model=VolunteerResponse)
@@ -286,7 +292,7 @@ def admin_create_volunteer(
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # 2. Resolve ngo_id: admin uses payload, NGO coordinator auto-sets their own NGO
-    ngo_id_val = getattr(payload, 'ngo_id', None)
+    ngo_id_val = payload.ngo_id
     if current_user.role == UserRole.NGO:
         ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
         if not ngo:
@@ -308,8 +314,9 @@ def admin_create_volunteer(
     db.flush()
 
     # 5. Create Volunteer profile linked by email
+    volunteer_name = payload.name if payload.name else payload.email.split('@')[0]
     volunteer = Volunteer(
-        name=payload.email.split('@')[0],  # Generic name initially
+        name=volunteer_name,
         email=payload.email,
         mobile_number=payload.mobile_number,
         skills=payload.skills,

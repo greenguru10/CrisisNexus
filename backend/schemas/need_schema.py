@@ -54,8 +54,11 @@ class NeedBase(BaseModel):
     assigned_volunteer_name: Optional[str] = None
     feedback_rating: Optional[float] = None
     feedback_comments: Optional[str] = None
+    my_ngo_completed: Optional[bool] = False
+    is_global_pool: Optional[bool] = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
 
     class Config:
         from_attributes = True

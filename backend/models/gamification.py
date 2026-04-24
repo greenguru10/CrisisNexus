@@ -109,8 +109,8 @@ class VolunteerBadge(Base):
     __tablename__ = "volunteer_badges"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    volunteer_id = Column(Integer, ForeignKey("volunteers.id"), nullable=False, index=True)
-    badge_id = Column(Integer, ForeignKey("badges.id"), nullable=False)
+    volunteer_id = Column(Integer, ForeignKey("volunteers.id", ondelete="CASCADE"), nullable=False, index=True)
+    badge_id = Column(Integer, ForeignKey("badges.id", ondelete="CASCADE"), nullable=False)
     earned_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):

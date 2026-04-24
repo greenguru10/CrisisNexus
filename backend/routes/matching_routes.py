@@ -26,14 +26,17 @@ router = APIRouter(tags=["Matching & Analytics"])
 
 def _get_approved_volunteers(db: Session, ngo_id: int | None = None):
     """
-    Return approved volunteers.
+    Return approved AND currently available volunteers.
     If ngo_id is set: only volunteers from that NGO.
     Admin (ngo_id=None): all approved volunteers system-wide.
     """
     query = (
         db.query(Volunteer)
         .join(User, User.email == Volunteer.email)
-        .filter(User.account_status == AccountStatus.APPROVED)
+        .filter(
+            User.account_status == AccountStatus.APPROVED,
+            Volunteer.availability == True,  # noqa: E712 — must be available
+        )
     )
     if ngo_id is not None:
         query = query.filter(Volunteer.ngo_id == ngo_id)
@@ -56,22 +59,31 @@ def match_volunteer(
     need = db.query(Need).filter(Need.id == need_id).first()
     if not need:
         raise HTTPException(status_code=404, detail=f"Need {need_id} not found")
-    if need.status == NeedStatus.ASSIGNED:
-        raise HTTPException(status_code=400, detail=f"Need {need_id} is already assigned")
     if need.status == NeedStatus.COMPLETED:
         raise HTTPException(status_code=400, detail=f"Need {need_id} is already completed")
 
     # Determine scope
     scope_ngo_id = None
     if current_user.role == UserRole.NGO:
+        from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
+        from models.need_volunteer_assignment import NeedVolunteerAssignment
         ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
         if not ngo:
             raise HTTPException(status_code=403, detail="No approved NGO found for this coordinator")
         scope_ngo_id = ngo.id
 
-        # NGO coordinators can only match volunteers to needs owned by their NGO
-        if need.ngo_id and need.ngo_id != scope_ngo_id:
-            raise HTTPException(status_code=403, detail="This need does not belong to your NGO")
+        # Check if already has manual assignments
+        existing_vols = db.query(NeedVolunteerAssignment).filter_by(
+            need_id=need_id, ngo_id=scope_ngo_id, is_active=True
+        ).count()
+        if existing_vols > 0:
+            raise HTTPException(status_code=400, detail="This task already has volunteers assigned by your NGO. Manual assignment is in use.")
+
+        has_ngo_assignment = db.query(NeedNGOAssignment).filter_by(
+            need_id=need_id, ngo_id=scope_ngo_id, status=NgoAssignStatus.ACCEPTED
+        ).first()
+        if not has_ngo_assignment:
+            raise HTTPException(status_code=403, detail="This need is not assigned to your NGO")
     elif current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only Admin or NGO coordinators can match volunteers")
 
@@ -83,19 +95,40 @@ def match_volunteer(
         )
 
     # Build workload map
-    active_needs = db.query(Need.assigned_volunteer_id, func.count(Need.id)).filter(
+    from models.need_volunteer_assignment import NeedVolunteerAssignment
+    active_needs = db.query(NeedVolunteerAssignment.volunteer_id, func.count(NeedVolunteerAssignment.need_id)).join(
+        Need, Need.id == NeedVolunteerAssignment.need_id
+    ).filter(
+        NeedVolunteerAssignment.is_active == True,
         Need.status.in_([NeedStatus.PENDING, NeedStatus.ACCEPTED, NeedStatus.IN_PROGRESS])
-    ).group_by(Need.assigned_volunteer_id).all()
+    ).group_by(NeedVolunteerAssignment.volunteer_id).all()
     workloads = {vol_id: count for vol_id, count in active_needs if vol_id}
 
     result = find_best_volunteer(need, available_volunteers, workloads)
     if not result:
         raise HTTPException(status_code=404, detail="No suitable volunteer found for this need")
 
-    need.status = NeedStatus.ASSIGNED
-    need.assigned_volunteer_id = result["volunteer_id"]
-
     volunteer = db.query(Volunteer).filter(Volunteer.id == result["volunteer_id"]).first()
+    
+    if current_user.role == UserRole.NGO:
+        from models.need_volunteer_assignment import NeedVolunteerAssignment
+        # Use team assignment table for NGOs
+        db.add(NeedVolunteerAssignment(
+            need_id=need_id, volunteer_id=result["volunteer_id"], ngo_id=scope_ngo_id,
+            assigned_by_id=current_user.id
+        ))
+        # Update need status if it was just accepted/assigned
+        if need.status in [NeedStatus.PENDING, NeedStatus.ASSIGNED]:
+            need.status = NeedStatus.ACCEPTED
+    else:
+        # Admin still uses the global single-volunteer field logic, now routed to junction table
+        need.status = NeedStatus.ASSIGNED
+        from models.need_volunteer_assignment import NeedVolunteerAssignment
+        db.add(NeedVolunteerAssignment(
+            need_id=need_id, volunteer_id=result["volunteer_id"], ngo_id=volunteer.ngo_id,
+            assigned_by_id=current_user.id
+        ))
+
     if volunteer:
         volunteer.availability = False
 
@@ -153,10 +186,13 @@ def manual_match_volunteer(
 
     # NGO coordinators can only assign within their NGO
     if current_user.role == UserRole.NGO:
+        from models.need_ngo_assignment import NeedNGOAssignment
         ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
         if not ngo:
             raise HTTPException(status_code=403, detail="No NGO found for coordinator")
-        if need.ngo_id and need.ngo_id != ngo.id:
+        # Check via junction table only (need.ngo_id column has been dropped)
+        ngo_assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo.id).first()
+        if not ngo_assignment:
             raise HTTPException(status_code=403, detail="Need does not belong to your NGO")
     elif current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Admin or NGO Coordinator required")
@@ -176,7 +212,11 @@ def manual_match_volunteer(
             raise HTTPException(status_code=403, detail="Volunteer does not belong to your NGO")
 
     need.status = NeedStatus.ASSIGNED
-    need.assigned_volunteer_id = volunteer.id
+    from models.need_volunteer_assignment import NeedVolunteerAssignment
+    db.add(NeedVolunteerAssignment(
+        need_id=need_id, volunteer_id=volunteer.id, ngo_id=volunteer.ngo_id,
+        assigned_by_id=current_user.id
+    ))
     volunteer.availability = False
     db.commit()
 
@@ -221,13 +261,16 @@ def unassign_volunteer(
     elif current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Admin or NGO Coordinator required")
 
-    if need.assigned_volunteer_id:
-        old_vol = db.query(Volunteer).filter(Volunteer.id == need.assigned_volunteer_id).first()
+    # Unassign logic
+    from models.need_volunteer_assignment import NeedVolunteerAssignment
+    assignment = db.query(NeedVolunteerAssignment).filter_by(need_id=need_id, is_active=True).first()
+    if assignment:
+        old_vol = db.query(Volunteer).filter(Volunteer.id == assignment.volunteer_id).first()
         if old_vol:
             old_vol.availability = True
+        assignment.is_active = False
 
     need.status = NeedStatus.PENDING
-    need.assigned_volunteer_id = None
     db.commit()
     return {"message": f"Need {need_id} is now unassigned and back to pending."}
 

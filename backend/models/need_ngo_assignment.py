@@ -1,5 +1,6 @@
 import enum
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Enum as SAEnum
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 
@@ -30,3 +31,17 @@ class NeedNGOAssignment(Base):
     admin_note  = Column(String(500), nullable=True)
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
     resolved_at = Column(DateTime(timezone=True), nullable=True)  # when accepted / rejected
+
+    # ── Per-NGO completion tracking ───────────────────────────────────────────
+    # When a volunteer from this NGO marks the task complete, is_completed → True.
+    # The Need only transitions to COMPLETED when ALL assigned NGOs have is_completed=True.
+    is_completed            = Column(Boolean, nullable=False, default=False, index=True)
+    completed_at            = Column(DateTime(timezone=True), nullable=True)
+    completed_by_volunteer_id = Column(
+        Integer,
+        ForeignKey("volunteers.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Which volunteer from this NGO completed the task",
+    )
+
+    need = relationship("Need", back_populates="ngo_assignments")

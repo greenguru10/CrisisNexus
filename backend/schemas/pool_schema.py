@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class PoolRequestCreate(BaseModel):
     source_ngo_id: Optional[int] = None
+    need_id: Optional[int] = None          # Task this pool request is for (optional)
     required_skills: Optional[List[str]] = []
     volunteers_needed: int = Field(1, ge=1)
     reason: str = Field(..., min_length=10)
@@ -28,6 +29,7 @@ class PoolRequestResponse(BaseModel):
     id: int
     requesting_ngo_id: int
     source_ngo_id: Optional[int]
+    need_id: Optional[int]
     required_skills: Optional[List[str]]
     volunteers_needed: int
     assigned_volunteer_ids: Optional[List[int]]

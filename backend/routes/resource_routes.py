@@ -34,12 +34,27 @@ def create_resource(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
 ):
-    """[ADMIN] Add a new resource to the global inventory."""
+    """[ADMIN] Add a new resource to the global inventory or merge into existing."""
+    # Check if item exists (same name and unit)
+    existing = db.query(ResourceInventory).filter(
+        ResourceInventory.name.ilike(payload.name),
+        ResourceInventory.unit.ilike(payload.unit)
+    ).first()
+
+    if existing:
+        existing.quantity += payload.quantity
+        if existing.quantity > 0 and existing.status == ResourceStatus.DEPLETED:
+            existing.status = ResourceStatus.AVAILABLE
+        db.commit()
+        db.refresh(existing)
+        logger.info("Admin %s updated existing resource: %s (added %f)", current_user.email, existing.name, payload.quantity)
+        return existing
+
     resource = ResourceInventory(**payload.model_dump())
     db.add(resource)
     db.commit()
     db.refresh(resource)
-    logger.info("Admin %s added resource: %s", current_user.email, resource.name)
+    logger.info("Admin %s added new resource: %s", current_user.email, resource.name)
     return resource
 
 
@@ -48,8 +63,9 @@ def list_resources(
     resource_type: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_user),
 ):
+
     """[ADMIN] List all resources with optional filters."""
     query = db.query(ResourceInventory)
     if resource_type:
@@ -106,14 +122,46 @@ def create_resource_request(
     if not ngo:
         raise HTTPException(status_code=404, detail="NGO not found for this coordinator")
 
+    # Edge Case: Check if item exists and has enough stock
+    item = db.query(ResourceInventory).filter(ResourceInventory.id == payload.resource_inventory_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Requested inventory item not found")
+    
+    if item.quantity < payload.quantity_requested:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Requested quantity ({payload.quantity_requested}) exceeds available stock ({item.quantity} {item.unit})"
+        )
+
     req = ResourceRequest(
         requesting_ngo_id=ngo.id,
-        **payload.model_dump(),
+        requested_inventory_id=payload.resource_inventory_id,
+        resource_type=payload.resource_type,
+        quantity_requested=payload.quantity_requested,
+        unit=payload.unit,
+        reason=payload.reason,
+        urgency=payload.urgency,
+        need_id=payload.need_id,
     )
     db.add(req)
     db.commit()
     db.refresh(req)
-    logger.info("NGO %s submitted resource request id=%d", ngo.name, req.id)
+    
+    # Audit Trail
+    if req.need_id:
+        from services.trail_service import add_trail_entry
+        from models.task_trail import TrailAction
+        add_trail_entry(
+            db, need_id=req.need_id, action=TrailAction.RESOURCE_REQUESTED,
+            actor_id=current_user.id, actor_role="ngo", actor_name=ngo.name,
+            detail={
+                "resource_id": item.id,
+                "resource_name": item.name,
+                "quantity": req.quantity_requested,
+                "unit": req.unit
+            },
+        )
+    logger.info("NGO %s submitted resource request id=%d for item %d", ngo.name, req.id, item.id)
     return req
 
 
@@ -189,6 +237,22 @@ def approve_resource_request(
 
     db.commit()
     db.refresh(req)
+
+    # Audit Trail
+    if req.need_id:
+        from services.trail_service import add_trail_entry
+        from models.task_trail import TrailAction
+        add_trail_entry(
+            db, need_id=req.need_id, action=TrailAction.RESOURCE_ALLOCATED,
+            actor_id=current_user.id, actor_role="admin", actor_name=current_user.email,
+            detail={
+                "resource_id": inventory_item.id,
+                "resource_name": inventory_item.name,
+                "quantity": req.quantity_allocated,
+                "unit": req.unit,
+                "requesting_ngo_id": req.requesting_ngo_id
+            },
+        )
     logger.info("Admin %s approved resource request id=%d", current_user.email, request_id)
     return req
 
@@ -316,9 +380,10 @@ def approve_contribution(
     if contrib.status != ContributionStatus.PENDING:
         raise HTTPException(status_code=400, detail=f"Already {contrib.status.value}")
 
-    # Find existing item by name (case-insensitive)
+    # Find existing item by name and unit (case-insensitive)
     inv_item = db.query(ResourceInventory).filter(
-        ResourceInventory.name.ilike(contrib.name)
+        ResourceInventory.name.ilike(contrib.name),
+        ResourceInventory.unit.ilike(contrib.unit)
     ).first()
 
     if inv_item:

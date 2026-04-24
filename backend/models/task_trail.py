@@ -16,6 +16,8 @@ class TrailAction(str, enum.Enum):
     STATUS_CHANGED     = "status_changed"
     COMPLETED          = "completed"
     RESOURCE_REQUESTED = "resource_requested"
+    RESOURCE_ALLOCATED = "resource_allocated"
+    POOL_ASSIGNED      = "pool_assigned"
 
 
 class TaskTrail(Base):

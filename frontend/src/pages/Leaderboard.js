@@ -137,8 +137,8 @@ export default function Leaderboard() {
 
                 {/* Score */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: isTop ? '#f59e0b' : '#6366f1' }}>{v.tasks_completed}</div>
-                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 500 }}>tasks done</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: isTop ? '#f59e0b' : '#6366f1' }}>{v.points || 0}</div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 500 }}>total points</div>
                 </div>
               </div>
             );

@@ -32,7 +32,7 @@ export default function ResourceInventory() {
 
   // Resource request (NGO)
   const [reqModal, setReqModal]   = useState(false);
-  const [reqForm, setReqForm]     = useState({ resource_type:'food', quantity:'', unit:'units', reason:'', urgency:'medium', need_id:'' });
+  const [reqForm, setReqForm]     = useState({ resource_inventory_id: '', resource_type:'food', quantity:'', unit:'units', reason:'', urgency:'medium', need_id:'' });
 
   // Contribute (NGO)
   const [ctbModal, setCtbModal]   = useState(false);
@@ -45,12 +45,14 @@ export default function ResourceInventory() {
     setLoading(true);
     try {
       if (isAdmin) {
-        const [inv, ctb] = await Promise.all([
+        const [inv, ctb, reqs] = await Promise.all([
           api.get('/api/resource'),
           api.get('/api/resource/contributions?status=pending'),
+          api.get('/api/resource/requests').catch(() => ({ data:[] })),
         ]);
         setInventory(inv.data);
         setContributions(ctb.data);
+        setMyRequests(reqs.data); // Reuse myRequests state for admin list
       } else {
         const [inv, reqs, ctbs, needs] = await Promise.all([
           api.get('/api/resource').catch(() => ({ data:[] })),
@@ -80,12 +82,48 @@ export default function ResourceInventory() {
     setSaving(false);
   };
 
+  // ── Admin: approve/reject resource request ────────────────────
+  const handleRequestAction = async (id, action, inventoryId = null, quantity = null) => {
+    try {
+      if (action === 'approve') {
+        if (!inventoryId) {
+          alert("This request is missing a linked inventory item. Please reject it and ask the NGO to submit a new request using the updated inventory system.");
+          return;
+        }
+        await api.post(`/api/resource/request/${id}/approve`, {
+          resource_inventory_id: inventoryId,
+          quantity_allocated: quantity,
+          admin_notes: 'Automatically approved via inventory match'
+        });
+      } else {
+        await api.post(`/api/resource/request/${id}/reject`, {
+          admin_notes: 'Rejected by Admin'
+        });
+      }
+      load();
+    } catch(err) { 
+      const detail = err.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
+      } else {
+        alert(detail || 'Operation failed');
+      }
+    }
+  };
+
   // ── Admin: approve/reject contribution ─────────────────────────
   const handleContribAction = async (id, action) => {
     try {
       await api.post(`/api/resource/contributions/${id}/${action}`, { admin_notes: null });
       load();
-    } catch(err) { alert(err.response?.data?.detail || 'Failed'); }
+    } catch(err) { 
+      const detail = err.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
+      } else {
+        alert(detail || 'Operation failed');
+      }
+    }
   };
 
   // ── NGO: submit request ─────────────────────────────────────────
@@ -93,7 +131,16 @@ export default function ResourceInventory() {
     e.preventDefault(); setSaving(true);
     try {
       const need = assignedNeeds.find(n => String(n.id) === String(reqForm.need_id));
+      const invItem = inventory.find(i => String(i.id) === String(reqForm.resource_inventory_id));
+      
+      if (invItem && parseFloat(reqForm.quantity) > invItem.quantity) {
+        alert(`Cannot request more than available quantity (${invItem.quantity} ${invItem.unit})`);
+        setSaving(false);
+        return;
+      }
+
       await api.post('/api/resource/request', {
+        resource_inventory_id: parseInt(reqForm.resource_inventory_id),
         resource_type: reqForm.resource_type,
         quantity_requested: parseFloat(reqForm.quantity),
         unit: reqForm.unit,
@@ -102,9 +149,16 @@ export default function ResourceInventory() {
         need_id: reqForm.need_id ? parseInt(reqForm.need_id) : null,
         need_description: need ? need.category : null,
       });
-      setReqModal(false); setReqForm({ resource_type:'food', quantity:'', unit:'units', reason:'', urgency:'medium', need_id:'' });
+      setReqModal(false); setReqForm({ resource_inventory_id: '', resource_type:'food', quantity:'', unit:'units', reason:'', urgency:'medium', need_id:'' });
       load();
-    } catch(err) { alert(err.response?.data?.detail || 'Failed'); }
+    } catch(err) { 
+      const detail = err.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
+      } else {
+        alert(detail || 'Operation failed');
+      }
+    }
     setSaving(false);
   };
 
@@ -115,7 +169,14 @@ export default function ResourceInventory() {
       await api.post('/api/resource/contribute', { ...ctbForm, quantity: parseFloat(ctbForm.quantity) });
       setCtbModal(false); setCtbForm({ resource_type:'food', name:'', quantity:'', unit:'units', notes:'' });
       load();
-    } catch(err) { alert(err.response?.data?.detail || 'Failed'); }
+    } catch(err) { 
+      const detail = err.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
+      } else {
+        alert(detail || 'Operation failed');
+      }
+    }
     setSaving(false);
   };
 
@@ -124,7 +185,7 @@ export default function ResourceInventory() {
     (i.resource_type || '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const TABS_ADMIN = [['inventory','📦 Inventory'], ['contributions','🔔 Contributions']];
+  const TABS_ADMIN = [['inventory','📦 Inventory'], ['requests','📤 Requests'], ['contributions','🔔 Contributions']];
   const TABS_NGO   = [['requests','📤 My Requests'], ['inventory','📦 Inventory'], ['contributions','🤝 My Contributions']];
   const TABS = isAdmin ? TABS_ADMIN : TABS_NGO;
 
@@ -196,20 +257,35 @@ export default function ResourceInventory() {
         </>
       )}
 
-      {/* ── NGO: My Requests tab ── */}
+      {/* ── Admin & NGO: Requests tab ── */}
       {!loading && tab === 'requests' && (
         <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
-          {myRequests.length === 0 && <p style={{ color:'#94a3b8', textAlign:'center', padding:'3rem' }}>No requests yet.</p>}
-          {myRequests.map(r => (
+          {(isAdmin ? myRequests : myRequests).length === 0 && <p style={{ color:'#94a3b8', textAlign:'center', padding:'3rem' }}>No requests found.</p>}
+          {(isAdmin ? myRequests : myRequests).map(r => (
             <div key={r.id} style={{ background:'#fff', border:'1.5px solid #f1f5f9', borderRadius:'12px', padding:'1rem 1.25rem', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'0.5rem' }}>
               <div>
-                <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{r.resource_type} — {r.quantity_requested} {r.unit}</span>
-                {r.need_description && <span style={{ marginLeft:'0.5rem', fontSize:'0.75rem', color:'#6366f1', fontWeight:500 }}>for: {r.need_description}</span>}
+                <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+                  <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{r.resource_type} — {r.quantity_requested} {r.unit}</span>
+                  {badge(r.status==='approved' ? '#10b981' : r.status==='rejected' ? '#ef4444' : '#f59e0b', r.status.toUpperCase())}
+                </div>
+                {isAdmin && <p style={{ margin:'0.2rem 0 0', fontSize:'0.75rem', color:'#6366f1' }}>from NGO #{r.requesting_ngo_id} {!r.requested_inventory_id && <span style={{color:'#ef4444'}}>(Old Request - No Item Link)</span>}</p>}
+                {r.need_description && <span style={{ fontSize:'0.75rem', color:'#6366f1', fontWeight:500 }}>for: {r.need_description}</span>}
                 <p style={{ margin:'0.2rem 0 0', color:'#64748b', fontSize:'0.78rem' }}>{r.reason}</p>
               </div>
-              <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'0.25rem' }}>
-                {badge(r.status==='approved' ? '#10b981' : r.status==='rejected' ? '#ef4444' : '#f59e0b', r.status.toUpperCase())}
-                {r.quantity_allocated && <span style={{ fontSize:'0.72rem', color:'#64748b' }}>Allocated: {r.quantity_allocated} {r.unit}</span>}
+              <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+                {isAdmin && r.status === 'pending' && (
+                  <>
+                    <button 
+                      onClick={() => handleRequestAction(r.id, 'approve', r.requested_inventory_id, r.quantity_requested)} 
+                      style={{ ...actionBtn('#10b981'), opacity: !r.requested_inventory_id ? 0.5 : 1 }}
+                      title={!r.requested_inventory_id ? "Cannot approve old requests without item link" : ""}
+                    >
+                      <Check size={13} /> Approve
+                    </button>
+                    <button onClick={() => handleRequestAction(r.id, 'reject')} style={actionBtn('#ef4444')}><X size={13} /> Reject</button>
+                  </>
+                )}
+                {!isAdmin && r.quantity_allocated && <span style={{ fontSize:'0.72rem', color:'#64748b' }}>Allocated: {r.quantity_allocated} {r.unit}</span>}
               </div>
             </div>
           ))}
@@ -273,13 +349,38 @@ export default function ResourceInventory() {
             <h3 style={mHead}>Request Resource from Admin</h3>
             <form onSubmit={handleRequest} style={{ display:'flex', flexDirection:'column', gap:'0.875rem' }}>
               <div>
-                <label style={lbl}>Resource Type</label>
-                <select value={reqForm.resource_type} onChange={e => setReqForm({...reqForm, resource_type:e.target.value})} style={sel}>
-                  {Object.keys(RTColors).map(t => <option key={t} value={t}>{t}</option>)}
+                <label style={lbl}>Select Item from Inventory *</label>
+                <select 
+                  value={reqForm.resource_inventory_id} 
+                  onChange={e => {
+                    const item = inventory.find(i => String(i.id) === e.target.value);
+                    if (item) {
+                      setReqForm({
+                        ...reqForm, 
+                        resource_inventory_id: e.target.value,
+                        resource_type: item.resource_type,
+                        unit: item.unit
+                      });
+                    }
+                  }} 
+                  style={sel} 
+                  required
+                >
+                  <option value="">— Select an item —</option>
+                  {inventory.filter(i => i.quantity > 0).map(i => (
+                    <option key={i.id} value={i.id}>{i.name} ({i.quantity} {i.unit} available)</option>
+                  ))}
                 </select>
               </div>
-              {fld('Quantity', 'number', reqForm.quantity, v => setReqForm({...reqForm, quantity:v}), '0', true)}
-              {fld('Unit', 'text', reqForm.unit, v => setReqForm({...reqForm, unit:v}), 'units')}
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <div style={{ flex: 2 }}>
+                  {fld('Quantity *', 'number', reqForm.quantity, v => setReqForm({...reqForm, quantity:v}), '0', true)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={lbl}>Unit</label>
+                  <input value={reqForm.unit} disabled style={{ ...inp, background:'#f8fafc', color:'#64748b' }} />
+                </div>
+              </div>
               <div>
                 <label style={lbl}>Urgency</label>
                 <select value={reqForm.urgency} onChange={e => setReqForm({...reqForm, urgency:e.target.value})} style={sel}>

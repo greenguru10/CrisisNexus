@@ -15,6 +15,8 @@ const ACTION_META = {
   status_changed:     { icon: '🔄', label: 'Status Updated',          color: '#64748b' },
   completed:          { icon: '🎉', label: 'Task Completed',          color: '#10b981' },
   resource_requested: { icon: '📦', label: 'Resource Requested',      color: '#f59e0b' },
+  resource_allocated: { icon: '✅', label: 'Resource Allocated',      color: '#10b981' },
+  pool_assigned:      { icon: '🤝', label: 'Pool Volunteers Added',   color: '#3b82f6' },
 };
 
 function fmtTime(iso) {
@@ -96,6 +98,16 @@ export default function TaskTrailPanel({ needId, needTitle, onClose }) {
         <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
           {loading && <p style={{ color: '#94a3b8', textAlign: 'center', paddingTop: '2rem' }}>Loading trail...</p>}
 
+          {!loading && entries.length > 0 && (
+            <div style={{ marginBottom: '2rem', padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Task Origin</p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Created on {fmtTime(entries[0].created_at)}</span>
+                <span style={{ fontSize: '0.82rem', color: '#6366f1', fontWeight: 600 }}>by {entries[0].actor_name || entries[0].actor_role}</span>
+              </div>
+            </div>
+          )}
+
           {!loading && entries.length === 0 && (
             <div style={{ textAlign: 'center', paddingTop: '3rem', color: '#94a3b8' }}>
               <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📋</p>
@@ -129,7 +141,9 @@ export default function TaskTrailPanel({ needId, needTitle, onClose }) {
                     {d.volunteer_names && d.volunteer_names.length > 0 && <DetailPill label="Volunteers" value={d.volunteer_names.join(', ')} />}
                     {d.note && <DetailPill label="Note" value={d.note} />}
                     {d.old_status && d.new_status && <DetailPill label="Status" value={d.old_status + ' to ' + d.new_status} />}
-                    {d.resource_name && <DetailPill label="Resource" value={d.resource_name + ' x' + d.qty} />}
+                    {d.resource_name && <DetailPill label="Resource" value={d.resource_name + ' (' + (d.quantity || d.qty || 0) + ' ' + (d.unit || '') + ')'} />}
+                    {d.feedback_rating && <DetailPill label="Rating" value={d.feedback_rating + ' / 5'} />}
+                    {d.fully_completed && <DetailPill label="Final" value="Task Fully Closed" />}
                   </div>
                 </div>
               </div>

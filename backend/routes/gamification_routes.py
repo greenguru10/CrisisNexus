@@ -50,7 +50,7 @@ def get_leaderboard(
     if scope_ngo_id:
         q = q.filter(Volunteer.ngo_id == scope_ngo_id)
 
-    top = q.order_by(Volunteer.tasks_completed.desc(), Volunteer.rating.desc()).limit(limit).all()
+    top = q.order_by(Volunteer.points.desc(), Volunteer.rating.desc()).limit(limit).all()
 
     # Enrich with badges
     leaderboard = []
@@ -67,9 +67,12 @@ def get_leaderboard(
             "volunteer_id": vol.id,
             "name": vol.name,
             "tasks_completed": vol.tasks_completed,
+            "points": vol.points,
             "rating": vol.rating,
+            "availability": vol.availability,
             "badges": badge_codes,
         })
+
 
     return {"leaderboard": leaderboard, "ngo_id": scope_ngo_id}
 

@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, Boolean, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 
@@ -14,7 +15,9 @@ class NeedVolunteerAssignment(Base):
     id             = Column(Integer, primary_key=True, autoincrement=True)
     need_id        = Column(Integer, ForeignKey("needs.id",       ondelete="CASCADE"), nullable=False, index=True)
     volunteer_id   = Column(Integer, ForeignKey("volunteers.id",  ondelete="CASCADE"), nullable=False, index=True)
-    ngo_id         = Column(Integer, ForeignKey("ngos.id",        ondelete="CASCADE"), nullable=False, index=True)
+    ngo_id         = Column(Integer, ForeignKey("ngos.id",        ondelete="CASCADE"), nullable=True, index=True)
     assigned_by_id = Column(Integer, ForeignKey("users.id",       ondelete="SET NULL"), nullable=True)
     is_active      = Column(Boolean, nullable=False, default=True)  # False = removed/unassigned
     assigned_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    need = relationship("Need", back_populates="volunteer_assignments")
