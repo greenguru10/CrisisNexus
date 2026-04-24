@@ -41,6 +41,13 @@ Every task tracks its own history. Using the **Audit Trail Panel**, you can see:
 - Which resources (trucks, food, etc.) were allocated.
 - Exactly which volunteer clicked the "Complete" button.
 
+### 🗺️ Geospatial Intelligence & Heatmap
+A fully integrated, interactive map powered by OpenStreetMap and React-Leaflet. It auto-clusters crisis markers to prevent UI clutter and features a dynamic density Heatmap layer that visually highlights high-priority disaster zones based on urgency and affected population.
+
+### 📄 Hybrid OCR & Pre-Validation Engine
+- **Image Preprocessing**: Automatically handles and parses uploaded images and scanned PDFs of handwritten reports via an EasyOCR-powered pipeline.
+- **Smart Validation Gate**: A pre-pipeline LLM layer ensures that only authentic disaster reports are processed, drastically reducing database spam.
+
 ### 📦 Automated Inventory Merging
 When an NGO contributes resources, the system automatically checks for existing entries. If you contribute "Rice" and "Rice" already exists, the quantities are merged, maintaining a clean and efficient warehouse view.
 
@@ -74,54 +81,110 @@ When an NGO contributes resources, the system automatically checks for existing 
 
 ## 🚀 Comprehensive Setup Guide
 
-### Step 1: Prerequisites
-Ensure you have the following installed:
-- **PostgreSQL 14+** (Database)
-- **Python 3.10+** (Backend Logic)
-- **Node.js 18+** (Frontend UI)
+This guide covers everything you need to get the application running locally from scratch, including database initialization and environment configuration.
+
+### Step 1: System Prerequisites
+Ensure your development environment has the following installed:
+- **PostgreSQL (14+)**: Required for relational data and robust querying.
+- **Python (3.10+)**: Required for the FastAPI backend and AI pipelines.
+- **Node.js (18+)**: Required for the React frontend.
+- **C++ Build Tools / Visual Studio**: (Windows only) required for compiling `EasyOCR` dependencies.
+
+---
 
 ### Step 2: Database Initialization (CRITICAL)
-1.  **Create the Database**: Open your PostgreSQL terminal (psql) or PGAdmin and run:
-    ```sql
-    CREATE DATABASE community_sync3;
-    ```
-2.  **Configure Env**: In `/backend`, create a `.env` file:
-    ```env
-    DATABASE_URL=postgresql+pg8000://postgres:YOUR_PASSWORD@localhost:5432/community_sync3
-    JWT_SECRET=any_random_secure_string
-    ```
-3.  **Run Schema Setup**: This script builds all tables, enums, and relations automatically.
-    ```bash
-    cd backend
-    python scripts/setup_db.py
-    ```
+
+The application uses PostgreSQL. You must create the database before running any backend scripts.
+
+1. **Open your PostgreSQL terminal (`psql`) or pgAdmin**.
+2. **Create the database and user** by running the following SQL commands:
+   ```sql
+   -- Create a dedicated database for the application
+   CREATE DATABASE community_sync3;
+   
+   -- (Optional but recommended) Create a dedicated user
+   CREATE USER sync_admin WITH PASSWORD 'your_secure_password';
+   
+   -- Grant privileges to the user
+   GRANT ALL PRIVILEGES ON DATABASE community_sync3 TO sync_admin;
+   ```
+
+---
 
 ### Step 3: Backend Configuration
-1.  **Virtual Environment**: Keep your system clean.
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    ```
-2.  **Install Dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    python -m spacy download en_core_web_sm  # Required for AI text analysis
-    ```
-3.  **Create Admin**: You must create a user to log in.
-    ```bash
-    python add_admin.py
-    ```
+
+The backend handles AI processing, API routing, and database interactions.
+
+1. **Navigate to the backend directory and create a Virtual Environment**:
+   ```bash
+   cd backend
+   python -m venv venv
+   
+   # Activate it (Windows):
+   venv\Scripts\activate
+   
+   # Activate it (Mac/Linux):
+   source venv/bin/activate
+   ```
+
+2. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   
+   # Download the required NLP model for SpaCy
+   python -m spacy download en_core_web_sm
+   ```
+   *(Note: OpenCV and EasyOCR will automatically install from requirements.txt for the image processing pipeline.)*
+
+3. **Configure Environment Variables (`.env`)**:
+   In the `backend` directory, create a file named `.env` and add the following:
+   ```env
+   # Database Connection String
+   # Format: postgresql+pg8000://<user>:<password>@localhost:5432/<dbname>
+   DATABASE_URL=postgresql+pg8000://postgres:YOUR_PASSWORD@localhost:5432/community_sync3
+   
+   # Security
+   JWT_SECRET=any_random_secure_string_here
+   
+   # Third-Party APIs
+   GROQ_API_KEY=your_groq_api_key_here          # Required for LLM text extraction/validation
+   OPENCAGE_API_KEY=your_opencage_api_key_here  # Required for Map/Location Geocoding
+   ```
+
+4. **Run the Automated Setup Script**:
+   This script builds all tables, enumerations, and relationships automatically.
+   ```bash
+   python scripts/setup_db.py
+   ```
+
+5. **Create an Admin Account**:
+   You need an Admin account to access the main dashboard.
+   ```bash
+   python add_admin.py
+   ```
+   *(Follow the terminal prompts to set an email and password).*
+
+---
 
 ### Step 4: Frontend Configuration
-1.  **Install Node Modules**:
-    ```bash
-    cd ../frontend
-    npm install
-    ```
-2.  **Set API URL**: Create a `.env` file in `/frontend`:
-    ```env
-    REACT_APP_API_URL=http://127.0.0.1:8000
-    ```
+
+1. **Navigate to the frontend directory**:
+   ```bash
+   # From the root project folder
+   cd frontend
+   ```
+
+2. **Install Node Modules**:
+   ```bash
+   npm install --legacy-peer-deps
+   ```
+   *(Note: `--legacy-peer-deps` is used to ensure React-Leaflet installs smoothly with React 18).*
+
+3. **Set API URL**: 
+   Create a `.env` file in the `/frontend` directory:
+   ```env
+   REACT_APP_API_URL=http://127.0.0.1:8000
+   ```
 
 ---
 

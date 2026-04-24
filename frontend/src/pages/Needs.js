@@ -9,9 +9,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import api from '../services/api';
 import TaskTrailPanel from '../components/TaskTrailPanel';
+import CrisisMap from '../components/CrisisMap';
 import {
   Search, Plus, Upload, Eye, Users, CheckCircle, XCircle,
-  Zap, List, Clock, AlertTriangle, ChevronRight
+  Zap, List, Clock, AlertTriangle, ChevronRight, Map, LayoutList
 } from 'lucide-react';
 
 function TabButton({ label, count, active, onClick }) {
@@ -81,6 +82,7 @@ export default function Needs() {
   const [filter, setFilter]             = useState('');
   const [ngoTab, setNgoTab]             = useState('active'); // 'active' | 'submitted' | 'completed'
   const [adminTab, setAdminTab]         = useState('all'); // 'all' | 'completed'
+  const [viewMode, setViewMode]         = useState('list'); // 'list' | 'map'
 
   // Trail panel
   const [trailNeed, setTrailNeed]       = useState(null); // { id, title }
@@ -240,13 +242,23 @@ export default function Needs() {
               : `${assignedNeeds.length} assigned · Click row for Task Trail`}
           </p>
         </div>
-        <div style={{ position: 'relative' }}>
-          <Search style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} size={16} />
-          <input
-            value={filter} onChange={e => setFilter(e.target.value)}
-            placeholder="Search needs…"
-            style={{ paddingLeft: '2.25rem', paddingRight: '1rem', paddingTop: '0.6rem', paddingBottom: '0.6rem', border: '1.5px solid #e2e8f0', borderRadius: '10px', fontFamily: 'inherit', fontSize: '0.875rem', outline: 'none', minWidth: '220px' }}
-          />
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', background: '#f1f5f9', padding: '0.25rem', borderRadius: '10px' }}>
+            <button onClick={() => setViewMode('list')} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', border: 'none', background: viewMode === 'list' ? '#fff' : 'transparent', color: viewMode === 'list' ? '#0f172a' : '#64748b', borderRadius: '8px', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer', boxShadow: viewMode === 'list' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>
+              <LayoutList size={16} /> List
+            </button>
+            <button onClick={() => setViewMode('map')} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', border: 'none', background: viewMode === 'map' ? '#fff' : 'transparent', color: viewMode === 'map' ? '#0f172a' : '#64748b', borderRadius: '8px', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer', boxShadow: viewMode === 'map' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>
+              <Map size={16} /> Map
+            </button>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <Search style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} size={16} />
+            <input
+              value={filter} onChange={e => setFilter(e.target.value)}
+              placeholder="Search needs…"
+              style={{ paddingLeft: '2.25rem', paddingRight: '1rem', paddingTop: '0.6rem', paddingBottom: '0.6rem', border: '1.5px solid #e2e8f0', borderRadius: '10px', fontFamily: 'inherit', fontSize: '0.875rem', outline: 'none', minWidth: '220px' }}
+            />
+          </div>
         </div>
       </div>
 
@@ -279,8 +291,14 @@ export default function Needs() {
         </div>
       )}
 
-      {/* Needs table */}
-      {!loading && displayNeeds.length > 0 && (
+      {/* Needs content: Map or List */}
+      {!loading && displayNeeds.length > 0 && viewMode === 'map' && (
+        <div style={{ marginTop: '1rem' }}>
+          <CrisisMap needs={displayNeeds} loading={loading} />
+        </div>
+      )}
+
+      {!loading && displayNeeds.length > 0 && viewMode === 'list' && (
         <div style={{ background: '#fff', borderRadius: '16px', border: '1.5px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>

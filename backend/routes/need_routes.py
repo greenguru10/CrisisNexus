@@ -257,6 +257,58 @@ def list_needs(
     return results
 
 
+@router.get("/needs/map-data")
+def get_map_data(
+    status: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    urgency: Optional[str] = Query(None),
+    ngo_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Lightweight endpoint returning only coordinates and basic info for mapping."""
+    from models.need_ngo_assignment import NeedNGOAssignment
+    
+    # Scope NGO coordinator to their own needs
+    scope_ngo_id = ngo_id
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        scope_ngo_id = ngo.id if ngo else -1
+
+    query = db.query(
+        Need.id, Need.latitude, Need.longitude, Need.category, 
+        Need.urgency, Need.people_affected, Need.status
+    ).filter(Need.latitude.isnot(None), Need.longitude.isnot(None))
+
+    if scope_ngo_id is not None:
+        ngo_need_ids = [
+            row.need_id for row in
+            db.query(NeedNGOAssignment.need_id).filter(NeedNGOAssignment.ngo_id == scope_ngo_id).all()
+        ]
+        query = query.filter(Need.id.in_(ngo_need_ids))
+    if status:
+        query = query.filter(Need.status == status)
+    if category:
+        query = query.filter(Need.category == category)
+    if urgency:
+        query = query.filter(Need.urgency == urgency)
+
+    needs = query.all()
+
+    return [
+        {
+            "id": n.id,
+            "latitude": n.latitude,
+            "longitude": n.longitude,
+            "category": n.category,
+            "urgency": n.urgency.value,
+            "people_affected": n.people_affected,
+            "status": n.status.value,
+        }
+        for n in needs
+    ]
+
+
 @router.get("/needs/{need_id}", response_model=NeedResponse)
 def get_need(need_id: int, db: Session = Depends(get_db)):
     """Get a single need by ID."""
