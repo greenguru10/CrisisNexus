@@ -499,6 +499,12 @@ def ngo_assign_volunteers(
     assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo.id, status="accepted").first()
     if not assignment:
         raise HTTPException(status_code=400, detail="Accept the task first before assigning volunteers")
+    if assignment.is_completed:
+        raise HTTPException(status_code=400, detail="Your NGO has already completed this task")
+
+    need = db.query(Need).filter(Need.id == need_id).first()
+    if need and need.status == NeedStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Cannot assign volunteers to a completed task")
 
     volunteer_names = []
     for vol_id in body.volunteer_ids:
@@ -522,9 +528,8 @@ def ngo_assign_volunteers(
         detail={"volunteer_ids": body.volunteer_ids, "volunteer_names": volunteer_names, "ngo_name": ngo.name},
     )
 
-    need = db.query(Need).filter(Need.id == need_id).first()
-    if need and need.status in (NeedStatus.PENDING, NeedStatus.ASSIGNED):
-        need.status = NeedStatus.IN_PROGRESS
+    if need and need.status == NeedStatus.PENDING:
+        need.status = NeedStatus.ASSIGNED
     db.commit()
     return {"message": f"{len(volunteer_names)} volunteer(s) assigned", "names": volunteer_names}
 

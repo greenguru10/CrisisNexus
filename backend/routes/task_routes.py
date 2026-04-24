@@ -13,9 +13,30 @@ from database import get_db
 from models.need import Need, NeedStatus
 from models.volunteer import Volunteer
 from dependencies.auth_dependency import get_current_user
+from models.task_trail import TaskTrail, TrailAction
+from services.trail_service import add_trail_entry
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Task Lifecycle"])
+
+
+def _has_volunteer_mark(db: Session, need_id: int, actor_id: int, marker: str) -> bool:
+    """Check if volunteer already emitted a status marker in trail for this need."""
+    entries = (
+        db.query(TaskTrail)
+        .filter(
+            TaskTrail.need_id == need_id,
+            TaskTrail.actor_id == actor_id,
+            TaskTrail.actor_role == "volunteer",
+            TaskTrail.action == TrailAction.STATUS_CHANGED,
+        )
+        .all()
+    )
+    for e in entries:
+        detail = e.detail_json or {}
+        if detail.get("marker") == marker:
+            return True
+    return False
 
 
 class CompleteTaskRequest(BaseModel):
@@ -70,6 +91,9 @@ def get_my_tasks(
         if hasattr(t, 'is_global_pool'):
             resp.is_global_pool = True
 
+        resp.my_has_accepted = _has_volunteer_mark(db, t.id, current_user.id, "accepted")
+        resp.my_has_started = _has_volunteer_mark(db, t.id, current_user.id, "started")
+
         # Check if the volunteer's NGO has completed this task
         if volunteer.ngo_id:
             ngo_assignment = db.query(NeedNGOAssignment).filter_by(need_id=t.id, ngo_id=volunteer.ngo_id).first()
@@ -99,11 +123,38 @@ def accept_task(
     if not volunteer or not assignment:
         raise HTTPException(status_code=403, detail="You are not authorized to accept this task")
 
-    if need.status not in [NeedStatus.ASSIGNED, NeedStatus.PENDING]:
-        raise HTTPException(status_code=400, detail=f"Cannot accept task in '{need.status}' status")
+    if need.status == NeedStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Task already completed")
 
-    # Reset streak if skipping (not applicable here — this is acceptance)
-    need.status = NeedStatus.ACCEPTED
+    # In multi-NGO mode, volunteer can accept as long as their NGO leg is not completed.
+    from models.need_ngo_assignment import NeedNGOAssignment
+    ngo_assignment = None
+    if volunteer.ngo_id:
+        ngo_assignment = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=volunteer.ngo_id).first()
+        if ngo_assignment and ngo_assignment.is_completed:
+            return {"message": "Your NGO has already completed this task", "status": need.status}
+
+    # Idempotent by volunteer marker: if already accepted once, return success.
+    if _has_volunteer_mark(db, need_id, current_user.id, "accepted"):
+        return {"message": "Task accepted successfully", "status": need.status}
+
+    # Idempotent: if task is already in_progress globally due to another NGO, still allow accept.
+    if need.status in [NeedStatus.PENDING, NeedStatus.ASSIGNED]:
+        need.status = NeedStatus.ACCEPTED
+
+    add_trail_entry(
+        db,
+        need_id=need_id,
+        action=TrailAction.STATUS_CHANGED,
+        actor_id=current_user.id,
+        actor_role="volunteer",
+        actor_name=volunteer.name,
+        detail={
+            "marker": "accepted",
+            "volunteer_id": volunteer.id,
+            "need_status_after": need.status.value if hasattr(need.status, "value") else str(need.status),
+        },
+    )
     db.commit()
     logger.info("Volunteer %s accepted task %d", volunteer.email, need_id)
     return {"message": "Task accepted successfully", "status": need.status}
@@ -127,10 +178,29 @@ def start_task(
     if not volunteer or not assignment:
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    if need.status != NeedStatus.ACCEPTED:
+    accepted_by_me = _has_volunteer_mark(db, need_id, current_user.id, "accepted")
+    if not accepted_by_me:
         raise HTTPException(status_code=400, detail="Must accept task before starting")
 
+    if need.status == NeedStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Task already completed")
+
+    if _has_volunteer_mark(db, need_id, current_user.id, "started"):
+        return {"message": "Task marked as in progress", "status": NeedStatus.IN_PROGRESS}
+
     need.status = NeedStatus.IN_PROGRESS
+    add_trail_entry(
+        db,
+        need_id=need_id,
+        action=TrailAction.STATUS_CHANGED,
+        actor_id=current_user.id,
+        actor_role="volunteer",
+        actor_name=volunteer.name,
+        detail={
+            "marker": "started",
+            "volunteer_id": volunteer.id,
+        },
+    )
     db.commit()
     return {"message": "Task marked as in progress", "status": need.status}
 
@@ -183,10 +253,14 @@ def complete_task(
     if not (direct_assignment or pool_assignment):
         raise HTTPException(status_code=403, detail="You are not authorized to complete this task (no active assignment found)")
 
-    if need.status not in [NeedStatus.ACCEPTED, NeedStatus.IN_PROGRESS, NeedStatus.ASSIGNED]:
+    if need.status not in [NeedStatus.ACCEPTED, NeedStatus.IN_PROGRESS]:
         raise HTTPException(
             status_code=400, detail="Cannot complete task that isn't in an active state"
         )
+
+    accepted_by_me = _has_volunteer_mark(db, need_id, current_user.id, "accepted")
+    if not accepted_by_me:
+        raise HTTPException(status_code=400, detail="Must accept task before completing")
 
     now = datetime.now(timezone.utc)
 
@@ -206,6 +280,13 @@ def complete_task(
             .filter_by(need_id=need_id, ngo_id=ngo_to_credit_id, status=NgoAssignStatus.ACCEPTED)
             .first()
         )
+        if ngo_assignment and ngo_assignment.is_completed:
+            # Idempotent guard: prevents repeated completion calls and duplicate side-effects.
+            return {
+                "message": "Your NGO has already marked this task as completed",
+                "status": need.status,
+                "all_completed": need.status == NeedStatus.COMPLETED,
+            }
         if ngo_assignment and not ngo_assignment.is_completed:
             ngo_assignment.is_completed = True
             ngo_assignment.completed_at = now
@@ -281,6 +362,7 @@ def complete_task(
             "fully_completed": all_done
         },
     )
+    db.commit()
 
     if all_done:
         background_tasks.add_task(

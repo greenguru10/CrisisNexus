@@ -39,6 +39,7 @@ export default function ResourceInventory() {
   const [ctbForm, setCtbForm]     = useState({ resource_type:'food', name:'', quantity:'', unit:'units', notes:'' });
 
   const [saving, setSaving]       = useState(false);
+  const [ngoUpdateCount, setNgoUpdateCount] = useState(0);
 
   // ── Fetch ───────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -70,6 +71,14 @@ export default function ResourceInventory() {
   }, [isAdmin]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      const resolvedReq = (myRequests || []).filter(r => r.status && r.status !== 'pending').length;
+      const resolvedContrib = (myContribs || []).filter(c => c.status && c.status !== 'pending').length;
+      setNgoUpdateCount(resolvedReq + resolvedContrib);
+    }
+  }, [isAdmin, myRequests, myContribs]);
 
   // ── Admin: add inventory ────────────────────────────────────────
   const handleAdd = async e => {
@@ -212,6 +221,12 @@ export default function ResourceInventory() {
         </div>
       </div>
 
+      {!isAdmin && ngoUpdateCount > 0 && (
+        <div style={{ marginBottom:'1rem', padding:'0.75rem 0.9rem', borderRadius:'10px', border:'1px solid #c7d2fe', background:'#eef2ff', color:'#4338ca', fontSize:'0.85rem', fontWeight:600 }}>
+          🔔 You have {ngoUpdateCount} resource update{ngoUpdateCount > 1 ? 's' : ''} (approved/rejected).
+        </div>
+      )}
+
       {/* Tabs */}
       <div style={{ display:'flex', gap:'0.5rem', borderBottom:'1px solid #e2e8f0', marginBottom:'1.5rem' }}>
         {TABS.map(([key, label]) => (
@@ -260,8 +275,8 @@ export default function ResourceInventory() {
       {/* ── Admin & NGO: Requests tab ── */}
       {!loading && tab === 'requests' && (
         <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
-          {(isAdmin ? myRequests : myRequests).length === 0 && <p style={{ color:'#94a3b8', textAlign:'center', padding:'3rem' }}>No requests found.</p>}
-          {(isAdmin ? myRequests : myRequests).map(r => (
+          {myRequests.length === 0 && <p style={{ color:'#94a3b8', textAlign:'center', padding:'3rem' }}>No requests found.</p>}
+          {myRequests.map(r => (
             <div key={r.id} style={{ background:'#fff', border:'1.5px solid #f1f5f9', borderRadius:'12px', padding:'1rem 1.25rem', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'0.5rem' }}>
               <div>
                 <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>

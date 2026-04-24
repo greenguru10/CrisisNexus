@@ -120,8 +120,6 @@ export default function PoolRequests() {
         </div>
       )}
 
-      {msg && <div style={{ padding:'0.875rem', borderRadius:'10px', marginBottom:'1rem', background:msg.toLowerCase().includes('fail')||msg.toLowerCase().includes('error')?'rgba(239,68,68,0.1)':'rgba(16,185,129,0.1)', border:`1px solid ${msg.toLowerCase().includes('fail')||msg.toLowerCase().includes('error')?'#ef4444':'#10b981'}44`, color:msg.toLowerCase().includes('fail')||msg.toLowerCase().includes('error')?'#f87171':'#6ee7b7', fontSize:'0.9rem' }}>{msg}</div>}
-
       <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
         {tab === 'lending' && lendingRequests.map(a => (
           <div key={a.assignment_id} style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', padding:'1.5rem' }}>

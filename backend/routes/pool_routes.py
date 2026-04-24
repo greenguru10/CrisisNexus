@@ -112,6 +112,25 @@ def approve_pool_request(
         vol = db.query(Volunteer).filter(Volunteer.id == vol_id).first()
         if not vol:
             raise HTTPException(status_code=404, detail=f"Volunteer id={vol_id} not found")
+
+        if req.source_ngo_id and vol.ngo_id != req.source_ngo_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Volunteer id={vol_id} is not from required source NGO id={req.source_ngo_id}",
+            )
+
+        # Prevent cross-request conflicts: same volunteer cannot be in another active
+        # pending/approved pool assignment at the same time.
+        conflicting = db.query(PoolAssignment).filter(
+            PoolAssignment.volunteer_id == vol_id,
+            PoolAssignment.is_active == True,
+            PoolAssignment.status.in_(["pending", "approved"]),
+        ).first()
+        if conflicting:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Volunteer id={vol_id} is already tied to another active pool request",
+            )
         volunteers.append(vol)
 
     now = datetime.now(timezone.utc)

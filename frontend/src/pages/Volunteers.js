@@ -29,7 +29,7 @@ const Volunteers = () => {
 
   useEffect(() => {
     fetchVolunteers();
-    if (isAdmin || isNgo) {
+    if (isNgo) {
       fetchPending();
     }
     if (isAdmin) {
@@ -138,7 +138,7 @@ const Volunteers = () => {
     }
   };
 
-  const displayList = activeTab === 'approved' ? volunteers : pendingVolunteers;
+  const displayList = (isNgo && activeTab === 'pending') ? pendingVolunteers : volunteers;
   const filtered = displayList.filter(v =>
     (v.name || '').toLowerCase().includes(filter.toLowerCase()) ||
     (v.location || '').toLowerCase().includes(filter.toLowerCase()) ||
@@ -148,7 +148,7 @@ const Volunteers = () => {
   // Admin approved tab: group volunteers by ngo_id
   const groupedByNgo = isAdmin && activeTab === 'approved'
     ? filtered.reduce((acc, v) => {
-        const key = v.ngo_id ? `NGO #${v.ngo_id}` : 'Unassigned';
+        const key = v.ngo_name || (v.ngo_id ? `NGO #${v.ngo_id}` : 'Unassigned');
         if (!acc[key]) acc[key] = [];
         acc[key].push(v);
         return acc;
@@ -194,7 +194,7 @@ const Volunteers = () => {
       </div>
 
       {/* TABS — Approved / Pending (Admin + NGO) */}
-      {(isAdmin || isNgo) && (
+      {isNgo && (
         <div className="flex gap-2 border-b border-gray-200 pb-0">
           <button
             onClick={() => setActiveTab('approved')}

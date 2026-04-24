@@ -55,6 +55,8 @@ class NeedBase(BaseModel):
     feedback_rating: Optional[float] = None
     feedback_comments: Optional[str] = None
     my_ngo_completed: Optional[bool] = False
+    my_has_accepted: Optional[bool] = False
+    my_has_started: Optional[bool] = False
     is_global_pool: Optional[bool] = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -107,26 +107,26 @@ const VolunteerTasks = () => {
 
               {/* ACTION BUTTONS */}
               <div className="pt-4 border-t border-gray-100">
-                {task.status === 'assigned' || task.status === 'pending' ? (
-                  <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'accept')} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-blue-700 disabled:opacity-50 transition-all">
-                    <CheckCircle size={18} /> {processing === task.id ? 'Processing...' : 'Accept Assignment'}
-                  </button>
-                ) : task.status === 'accepted' ? (
-                  <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'start')} className="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-indigo-700 disabled:opacity-50 transition-all">
-                    <Play size={18} /> {processing === task.id ? 'Processing...' : 'Make In-Progress'}
-                  </button>
-                ) : (task.status === 'in_progress' || task.status === 'accepted') && task.my_ngo_completed ? (
-                  <div className="w-full py-2.5 bg-blue-50 text-blue-500 rounded-lg font-bold flex justify-center items-center gap-2 border border-blue-100">
-                    <CheckCircle2 size={18} /> Waiting for other NGOs
-                  </div>
-                ) : task.status === 'in_progress' ? (
-                  <button disabled={processing === task.id} onClick={() => setCompletingTask(task.id)} className="w-full py-2.5 bg-green-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-green-700 disabled:opacity-50 transition-all">
-                    <CheckCircle2 size={18} /> Complete Task
-                  </button>
-                ) : (
+                {task.status === 'completed' ? (
                   <div className="w-full py-2.5 bg-gray-50 text-gray-400 rounded-lg font-bold flex justify-center items-center gap-2">
                     <CheckCircle2 size={18} /> Finished
                   </div>
+                ) : task.my_ngo_completed ? (
+                  <div className="w-full py-2.5 bg-blue-50 text-blue-500 rounded-lg font-bold flex justify-center items-center gap-2 border border-blue-100">
+                    <CheckCircle2 size={18} /> Waiting for other NGOs
+                  </div>
+                ) : !task.my_has_accepted ? (
+                  <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'accept')} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-blue-700 disabled:opacity-50 transition-all">
+                    <CheckCircle size={18} /> {processing === task.id ? 'Processing...' : 'Accept Assignment'}
+                  </button>
+                ) : !task.my_has_started ? (
+                  <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'start')} className="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-indigo-700 disabled:opacity-50 transition-all">
+                    <Play size={18} /> {processing === task.id ? 'Processing...' : 'Make In-Progress'}
+                  </button>
+                ) : (
+                  <button disabled={processing === task.id} onClick={() => setCompletingTask(task.id)} className="w-full py-2.5 bg-green-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-green-700 disabled:opacity-50 transition-all">
+                    <CheckCircle2 size={18} /> Complete Task
+                  </button>
                 )}
               </div>
             </div>

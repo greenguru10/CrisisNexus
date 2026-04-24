@@ -42,6 +42,7 @@ def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
         "availability": volunteer.availability,
         "rating": volunteer.rating,
         "ngo_id": volunteer.ngo_id,
+        "ngo_name": None,
         "tasks_completed": volunteer.tasks_completed,
         "created_at": volunteer.created_at,
         "updated_at": volunteer.updated_at,
@@ -51,6 +52,10 @@ def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
         user = db.query(User).filter(User.email == volunteer.email).first()
         if user:
             vol_dict["account_status"] = user.account_status.value
+    if volunteer.ngo_id:
+        ngo = db.query(NGO).filter(NGO.id == volunteer.ngo_id).first()
+        if ngo:
+            vol_dict["ngo_name"] = ngo.name
     return vol_dict
 
 
@@ -160,8 +165,9 @@ def list_pending_volunteers(
         scope_id = ngo.id if ngo else -1
         query = query.filter(Volunteer.ngo_id == scope_id)
     elif current_user.role == UserRole.ADMIN:
-        # Admin only sees volunteers who are NOT assigned to any NGO
-        query = query.filter(Volunteer.ngo_id == None)
+        # Product decision: volunteer approvals are NGO-owned.
+        # Keep admin pending list empty to avoid duplicate approval surfaces.
+        return []
 
     pending_volunteers = query.order_by(Volunteer.created_at.desc()).all()
     return [_enrich_volunteer_response(v, db) for v in pending_volunteers]

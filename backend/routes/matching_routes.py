@@ -117,12 +117,14 @@ def match_volunteer(
             need_id=need_id, volunteer_id=result["volunteer_id"], ngo_id=scope_ngo_id,
             assigned_by_id=current_user.id
         ))
-        # Update need status if it was just accepted/assigned
-        if need.status in [NeedStatus.PENDING, NeedStatus.ASSIGNED]:
-            need.status = NeedStatus.ACCEPTED
+        # Keep lifecycle at ASSIGNED so volunteer must explicitly accept.
+        # Do not downgrade if another NGO has already progressed it to IN_PROGRESS.
+        if need.status == NeedStatus.PENDING:
+            need.status = NeedStatus.ASSIGNED
     else:
         # Admin still uses the global single-volunteer field logic, now routed to junction table
-        need.status = NeedStatus.ASSIGNED
+        if need.status == NeedStatus.PENDING:
+            need.status = NeedStatus.ASSIGNED
         from models.need_volunteer_assignment import NeedVolunteerAssignment
         db.add(NeedVolunteerAssignment(
             need_id=need_id, volunteer_id=result["volunteer_id"], ngo_id=volunteer.ngo_id,
@@ -211,7 +213,8 @@ def manual_match_volunteer(
         if volunteer.ngo_id != ngo.id:
             raise HTTPException(status_code=403, detail="Volunteer does not belong to your NGO")
 
-    need.status = NeedStatus.ASSIGNED
+    if need.status == NeedStatus.PENDING:
+        need.status = NeedStatus.ASSIGNED
     from models.need_volunteer_assignment import NeedVolunteerAssignment
     db.add(NeedVolunteerAssignment(
         need_id=need_id, volunteer_id=volunteer.id, ngo_id=volunteer.ngo_id,
