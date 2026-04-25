@@ -118,17 +118,17 @@ export default function Landing() {
       
       {/* ── NAV ── */}
       <nav className="fixed top-0 w-full z-40 bg-white/80 backdrop-blur-md border-b border-slate-200/50 transition-all">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="text-3xl">🌍</span>
-            <span className="font-extrabold text-2xl text-indigo-600 tracking-tight">CommunitySync</span>
+        <div className="max-w-7xl mx-auto px-4 md:px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-2 md:gap-2.5 shrink-0">
+            <span className="text-2xl md:text-3xl">🌍</span>
+            <span className="font-extrabold text-xl md:text-2xl text-indigo-600 tracking-tight">CommunitySync</span>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2 sm:gap-6 shrink-0">
             <button onClick={() => document.getElementById('volunteer').scrollIntoView({ behavior: 'smooth' })} className="hidden md:block text-sm font-semibold text-slate-600 hover:text-indigo-600 transition-colors">Volunteers</button>
             <button onClick={() => document.getElementById('ngo').scrollIntoView({ behavior: 'smooth' })} className="hidden md:block text-sm font-semibold text-slate-600 hover:text-indigo-600 transition-colors">NGOs</button>
             <button onClick={() => document.getElementById('admin').scrollIntoView({ behavior: 'smooth' })} className="hidden md:block text-sm font-semibold text-slate-600 hover:text-indigo-600 transition-colors">Admins</button>
             <div className="w-px h-6 bg-slate-200 hidden md:block mx-2"></div>
-            <button onClick={() => setShowLoginModal(true)} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-full font-bold text-sm shadow-lg shadow-indigo-600/20 transition-all hover:-translate-y-0.5">
+            <button onClick={() => setShowLoginModal(true)} className="flex items-center gap-1.5 md:gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 md:px-6 py-2 md:py-2.5 rounded-full font-bold text-sm shadow-lg shadow-indigo-600/20 transition-all hover:-translate-y-0.5 whitespace-nowrap">
               <LogIn size={18} strokeWidth={2.5} /> Sign In
             </button>
           </div>

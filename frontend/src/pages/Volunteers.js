@@ -167,16 +167,16 @@ const Volunteers = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Volunteers</h1>
           <p className="text-gray-500 text-sm">{volunteers.length} approved volunteers</p>
         </div>
-        <div className="flex gap-3">
-          <div className="relative">
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+          <div className="relative w-full sm:w-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
-              className="pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white w-64 transition-all"
+              className="pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white w-full sm:w-64 transition-all"
               placeholder="Search by name, skill..."
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -185,7 +185,7 @@ const Volunteers = () => {
           {(isAdmin || isNgo) && (
             <button
               onClick={() => setCreateModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition whitespace-nowrap w-full sm:w-auto"
             >
               <Plus size={18} /> Add Volunteer
             </button>
@@ -195,10 +195,10 @@ const Volunteers = () => {
 
       {/* TABS — Approved / Pending (Admin + NGO) */}
       {(isAdmin || isNgo) && (
-        <div className="flex gap-2 border-b border-gray-200 pb-0">
+        <div className="flex overflow-x-auto gap-2 border-b border-gray-200 pb-0 hide-scrollbar">
           <button
             onClick={() => setActiveTab('approved')}
-            className={`flex items-center gap-2 px-4 py-2.5 font-medium text-sm rounded-t-lg transition-all border-b-2 ${
+            className={`flex items-center gap-2 px-4 py-2.5 font-medium text-sm rounded-t-lg transition-all border-b-2 whitespace-nowrap shrink-0 ${
               activeTab === 'approved'
                 ? 'border-blue-600 text-blue-600 bg-blue-50/50'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -212,7 +212,7 @@ const Volunteers = () => {
           </button>
           <button
             onClick={() => setActiveTab('pending')}
-            className={`flex items-center gap-2 px-4 py-2.5 font-medium text-sm rounded-t-lg transition-all border-b-2 ${
+            className={`flex items-center gap-2 px-4 py-2.5 font-medium text-sm rounded-t-lg transition-all border-b-2 whitespace-nowrap shrink-0 ${
               activeTab === 'pending'
                 ? 'border-amber-500 text-amber-600 bg-amber-50/50'
                 : 'border-transparent text-gray-500 hover:text-gray-700'

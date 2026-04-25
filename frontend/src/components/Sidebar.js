@@ -1,12 +1,12 @@
 import React from 'react';
 import {
   LayoutDashboard, HeartPulse, Users, Upload, HelpCircle, LogOut,
-  Building2, Package, Share2, BarChart3, Trophy, ClipboardList
+  Building2, Package, Share2, BarChart3, Trophy, ClipboardList, X
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { getRole } from '../utils/auth';
 
-const Sidebar = () => {
+const Sidebar = ({ isOpen, setIsOpen }) => {
   const role = getRole();
   const location = useLocation();
   const ngoName = localStorage.getItem('ngo_name');
@@ -47,14 +47,32 @@ const Sidebar = () => {
   ].filter(s => s.items.length > 0);
 
   return (
-    <div className="w-64 bg-white border-r border-gray-100 flex flex-col h-full shadow-lg shadow-gray-100/50 z-50">
-      {/* Brand */}
-      <div className="p-6 border-b border-gray-50">
-        <h1 className="text-xl font-bold text-blue-600 tracking-tight">🌍 CommunitySync</h1>
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
-          {role === 'admin' ? 'System Administrator' : role === 'ngo' ? (ngoName || 'NGO Coordinator') : 'Volunteer'}
-        </p>
-      </div>
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+
+      {/* Sidebar Drawer */}
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-100 flex flex-col h-full shadow-2xl md:shadow-none transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        {/* Brand */}
+        <div className="p-6 border-b border-gray-50 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-blue-600 tracking-tight">🌍 CommunitySync</h1>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
+              {role === 'admin' ? 'System Administrator' : role === 'ngo' ? (ngoName || 'NGO Coordinator') : 'Volunteer'}
+            </p>
+          </div>
+          <button 
+            className="md:hidden text-gray-400 hover:text-gray-600 p-1"
+            onClick={() => setIsOpen(false)}
+          >
+            <X size={20} />
+          </button>
+        </div>
 
       {/* Nav */}
       <nav className="flex-1 px-4 py-4 overflow-y-auto space-y-4">
@@ -103,7 +121,8 @@ const Sidebar = () => {
           <LogOut size={18} /> Log Out
         </button>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

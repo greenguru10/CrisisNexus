@@ -96,9 +96,9 @@ const Register = () => {
   // ── Pending approval screen ──────────────────────────────────────────
   if (pendingApproval) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-        <div className="max-w-md w-full mx-4">
-          <div className="bg-white rounded-2xl shadow-xl shadow-blue-500/10 p-8 border border-gray-100 text-center">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4">
+        <div className="max-w-md w-full">
+          <div className="bg-white rounded-2xl shadow-xl shadow-blue-500/10 p-6 sm:p-8 border border-gray-100 text-center">
             <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <CheckCircle size={28} />
             </div>
@@ -127,9 +127,9 @@ const Register = () => {
 
   // ── Registration form ────────────────────────────────────────────────
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 py-8">
-      <div className="max-w-md w-full mx-4">
-        <div className="bg-white rounded-2xl shadow-xl shadow-blue-500/10 p-8 border border-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 py-8 px-4">
+      <div className="max-w-md w-full">
+        <div className="bg-white rounded-2xl shadow-xl shadow-blue-500/10 p-6 sm:p-8 border border-gray-100">
           {/* Header */}
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-green-100 text-green-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
