@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # ── NLP / LLM ────────────────────────────────────────────────
     GROQ_API_KEY: str
     OPENCAGE_API_KEY: str
+    GEMINI_API_KEY: Optional[str] = None
 
     @property
     def cors_origins_list(self) -> List[str]:

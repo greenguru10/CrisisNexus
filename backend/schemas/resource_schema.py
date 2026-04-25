@@ -41,6 +41,17 @@ class ResourceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Frontend-friendly aliases
+    @property
+    def title(self) -> str:
+        """Alias for name — used by the Resources tab."""
+        return self.name
+
+    @property
+    def availability(self) -> bool:
+        """True when status is 'available'."""
+        return self.status == "available"
+
     model_config = {"from_attributes": True}
 
 

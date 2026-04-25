@@ -253,6 +253,10 @@ def list_needs(
             vol = db.query(Volunteer).filter(Volunteer.id == vol_id).first()
             if vol:
                 data.assigned_volunteer_name = vol.name
+
+        # Populate assigned_ngo_ids
+        data.assigned_ngo_ids = [a.ngo_id for a in need.ngo_assignments if a.status.value != "rejected"]
+
         results.append(data)
     return results
 
@@ -461,7 +465,14 @@ def assign_need_to_ngos(
     for ngo_id_to_rem in to_remove:
         a = db.query(NeedNGOAssignment).filter_by(need_id=need_id, ngo_id=ngo_id_to_rem).first()
         if a:
-            a.status = NgoAssignStatus.REJECTED # Mark as rejected/removed so consensus ignores them
+            if a.status == NgoAssignStatus.COMPLETED:
+                # Never touch a completed allocation — it must stay for audit/consensus
+                logger.warning(
+                    "Admin %s tried to remove completed NGO %d from need %d — skipped",
+                    current_user.email, ngo_id_to_rem, need_id,
+                )
+                continue
+            a.status = NgoAssignStatus.REJECTED
             logger.info("Admin %s removed NGO %d from need %d during reassignment", current_user.email, ngo_id_to_rem, need_id)
 
     ngo_names = []
@@ -604,9 +615,12 @@ def ngo_assign_volunteers(
             need_id=need_id, volunteer_id=vol_id, ngo_id=ngo.id, is_active=True
         ).first()
         if not exists:
+            from models.need_volunteer_assignment import VolunteerTaskStatus
             db.add(NeedVolunteerAssignment(
                 need_id=need_id, volunteer_id=vol_id, ngo_id=ngo.id,
                 assigned_by_id=current_user.id,
+                status=VolunteerTaskStatus.ASSIGNED,   # explicit ASSIGNED — no auto-accept
+                is_active=True,
             ))
         vol.availability = False
         volunteer_names.append(vol.name or f"Vol#{vol_id}")
@@ -617,9 +631,8 @@ def ngo_assign_volunteers(
         detail={"volunteer_ids": body.volunteer_ids, "volunteer_names": volunteer_names, "ngo_name": ngo.name},
     )
 
-    need = db.query(Need).filter(Need.id == need_id).first()
-    if need and need.status in (NeedStatus.PENDING, NeedStatus.ASSIGNED):
-        need.status = NeedStatus.IN_PROGRESS
+    # Need stays in ASSIGNED — volunteers must explicitly accept then start
+    # (removed the old auto IN_PROGRESS transition that caused the accept-bug)
     db.commit()
     return {"message": f"{len(volunteer_names)} volunteer(s) assigned", "names": volunteer_names}
 

@@ -1,85 +1,225 @@
 """
 Task routes – Volunteer lifecycle management for accepting, starting, and completing tasks.
-Updated: hooks gamification service on completion.
+
+3-Layer State Machine (enforced here):
+  Volunteer Task:  ASSIGNED → ACCEPTED → IN_PROGRESS → COMPLETED
+  NGO Allocation:  PENDING  → ACCEPTED → IN_PROGRESS → COMPLETED
+  Global Need:     PENDING  → ASSIGNED → IN_PROGRESS → COMPLETED
+
+Key fixes applied:
+  - accept/start/complete now check NeedVolunteerAssignment.status, NOT Need.status
+  - No state skipping allowed (enforced by guards at each transition)
+  - Completion lock: completed tasks cannot be re-completed or restarted
+  - NGO-level consensus uses status == COMPLETED (not deprecated is_completed bool)
+  - Global need completion only when ALL non-rejected NGO allocations are COMPLETED
 """
 
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 from database import get_db
 from models.need import Need, NeedStatus
 from models.volunteer import Volunteer
-from dependencies.auth_dependency import get_current_user
+from models.need_volunteer_assignment import NeedVolunteerAssignment, VolunteerTaskStatus
+from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
+from dependencies.auth_dependency import get_current_user, get_current_ngo_coordinator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Task Lifecycle"])
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 class CompleteTaskRequest(BaseModel):
     feedback_rating: Optional[float] = None
     feedback_comments: Optional[str] = None
 
 
+def _get_volunteer_assignment(
+    db: Session, need_id: int, volunteer_id: int
+) -> NeedVolunteerAssignment | None:
+    """Return the active volunteer assignment row (not COMPLETED to allow lock check)."""
+    return (
+        db.query(NeedVolunteerAssignment)
+        .filter_by(need_id=need_id, volunteer_id=volunteer_id, is_active=True)
+        .first()
+    )
+
+
+def _check_all_ngo_done(db: Session, need_id: int) -> bool:
+    """
+    Return True when every non-rejected NGO allocation is COMPLETED.
+    Legacy path: if no allocations exist → treat as complete immediately (single-NGO legacy).
+    """
+    allocations = (
+        db.query(NeedNGOAssignment)
+        .filter(
+            NeedNGOAssignment.need_id == need_id,
+            NeedNGOAssignment.status != NgoAssignStatus.REJECTED,
+        )
+        .all()
+    )
+    if not allocations:
+        return True  # no multi-NGO setup → complete immediately
+    return all(a.status == NgoAssignStatus.COMPLETED for a in allocations)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /my-tasks  (volunteer's task list with per-volunteer status)
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.get("/my-tasks")
 def get_my_tasks(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Fetch tasks assigned to the currently logged-in volunteer."""
+    """Fetch tasks assigned to the currently logged-in volunteer with per-volunteer status."""
     volunteer = db.query(Volunteer).filter(Volunteer.email == current_user.email).first()
     if not volunteer:
         return []
-    # 1. Fetch all tasks assigned to this volunteer (direct or team)
-    from models.need_volunteer_assignment import NeedVolunteerAssignment
-    team_assignments = db.query(NeedVolunteerAssignment).filter(
-        NeedVolunteerAssignment.volunteer_id == volunteer.id,
-        # Remove is_active check to show past tasks too
+
+    # 1. Direct team assignments
+    team_assignments = db.query(NeedVolunteerAssignment).filter_by(
+        volunteer_id=volunteer.id
     ).all()
     team_need_ids = [a.need_id for a in team_assignments]
-    team_tasks = db.query(Need).filter(Need.id.in_(team_need_ids)).all() if team_need_ids else []
+    # Map need_id → volunteer assignment for status enrichment
+    vol_status_map = {a.need_id: a.status.value for a in team_assignments}
 
-    # Map by ID
+    team_tasks = db.query(Need).filter(Need.id.in_(team_need_ids)).all() if team_need_ids else []
     task_map = {t.id: t for t in team_tasks}
-    # 3. Pool assignments (borrowed volunteers)
-    from models.pool_request import PoolAssignment
+
+    # 2. Pool assignments (borrowed volunteers)
+    from models.pool_request import PoolAssignment, VolunteerPoolRequest
     pool_assignments = db.query(PoolAssignment).filter(
         PoolAssignment.volunteer_id == volunteer.id,
-        PoolAssignment.status == "approved"
+        PoolAssignment.status == "approved",
     ).all()
     pool_req_ids = [pa.pool_request_id for pa in pool_assignments]
     if pool_req_ids:
-        from models.pool_request import VolunteerPoolRequest
-        pool_reqs = db.query(VolunteerPoolRequest).filter(VolunteerPoolRequest.id.in_(pool_req_ids)).all()
+        pool_reqs = db.query(VolunteerPoolRequest).filter(
+            VolunteerPoolRequest.id.in_(pool_req_ids)
+        ).all()
         pool_need_ids = [pr.need_id for pr in pool_reqs if pr.need_id]
         pool_tasks = db.query(Need).filter(Need.id.in_(pool_need_ids)).all() if pool_need_ids else []
         for pt in pool_tasks:
             if pt.id not in task_map:
-                pt.is_global_pool = True # UI marker
+                pt.is_global_pool = True
                 task_map[pt.id] = pt
 
     tasks = sorted(task_map.values(), key=lambda x: x.updated_at, reverse=True)
     from schemas.need_schema import NeedResponse
-    from models.need_ngo_assignment import NeedNGOAssignment
-    
+
     results = []
     for t in tasks:
         resp = NeedResponse.model_validate(t)
-        if hasattr(t, 'is_global_pool'):
+        if hasattr(t, "is_global_pool"):
             resp.is_global_pool = True
 
-        # Check if the volunteer's NGO has completed this task
+        # Enrich with per-volunteer status
+        resp.volunteer_task_status = vol_status_map.get(t.id)
+
+        # Enrich with per-NGO allocation status
         if volunteer.ngo_id:
-            ngo_assignment = db.query(NeedNGOAssignment).filter_by(need_id=t.id, ngo_id=volunteer.ngo_id).first()
-            if ngo_assignment:
-                resp.my_ngo_completed = ngo_assignment.is_completed
+            ngo_assign = db.query(NeedNGOAssignment).filter_by(
+                need_id=t.id, ngo_id=volunteer.ngo_id
+            ).first()
+            if ngo_assign:
+                resp.ngo_assignment_status = ngo_assign.status.value
+                resp.my_ngo_completed = (ngo_assign.status == NgoAssignStatus.COMPLETED)
+
         results.append(resp)
-        
+
     return results
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /volunteer/tasks  (alias with richer shape — matches API spec)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/volunteer/tasks")
+def get_volunteer_tasks(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    GET /api/task/volunteer/tasks
+    Returns the authenticated volunteer's tasks with full per-volunteer status.
+    """
+    return get_my_tasks(db=db, current_user=current_user)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /ngo/tasks  (NGO coordinator sees their allocation + volunteer statuses)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/ngo/tasks")
+def get_ngo_tasks(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_ngo_coordinator),
+):
+    """
+    GET /api/task/ngo/tasks
+    Returns all needs assigned to this NGO with per-NGO allocation status and
+    per-volunteer sub-statuses.
+    """
+    from models.ngo import NGO
+    ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+    if not ngo:
+        raise HTTPException(status_code=404, detail="NGO not found for this coordinator")
+
+    allocations = (
+        db.query(NeedNGOAssignment)
+        .filter(NeedNGOAssignment.ngo_id == ngo.id)
+        .all()
+    )
+    need_ids = [a.need_id for a in allocations]
+    ngo_status_map = {a.need_id: a.status.value for a in allocations}
+
+    needs = db.query(Need).filter(Need.id.in_(need_ids)).all() if need_ids else []
+    result = []
+    for n in needs:
+        d = {
+            "id": n.id,
+            "title": n.category,         # alias for UI
+            "category": n.category,
+            "urgency": n.urgency.value,
+            "status": n.status.value,
+            "people_affected": n.people_affected,
+            "location": n.location,
+            "priority_score": n.priority_score,
+            "ngo_assignment_status": ngo_status_map.get(n.id),
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+            "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+        }
+        # Per-volunteer sub-statuses for this NGO
+        vol_assignments = db.query(NeedVolunteerAssignment).filter_by(
+            need_id=n.id, ngo_id=ngo.id, is_active=True
+        ).all()
+        d["volunteer_assignments"] = [
+            {
+                "volunteer_id": va.volunteer_id,
+                "status": va.status.value,
+                "assigned_at": va.assigned_at.isoformat() if va.assigned_at else None,
+                "accepted_at": va.accepted_at.isoformat() if va.accepted_at else None,
+                "started_at": va.started_at.isoformat() if va.started_at else None,
+                "completed_at": va.completed_at.isoformat() if va.completed_at else None,
+            }
+            for va in vol_assignments
+        ]
+        result.append(d)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /{need_id}/accept
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/{need_id}/accept")
 def accept_task(
@@ -87,27 +227,71 @@ def accept_task(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Volunteer accepts an assigned task."""
+    """
+    Volunteer accepts an assigned task.
+
+    Gate: NeedVolunteerAssignment.status must be ASSIGNED.
+    Transition: ASSIGNED → ACCEPTED
+    Does NOT touch Need.status (global status is independent).
+    """
     need = db.query(Need).filter(Need.id == need_id).first()
     if not need:
         raise HTTPException(status_code=404, detail="Task not found")
 
     volunteer = db.query(Volunteer).filter(Volunteer.email == current_user.email).first()
-    from models.need_volunteer_assignment import NeedVolunteerAssignment
-    assignment = db.query(NeedVolunteerAssignment).filter_by(need_id=need_id, volunteer_id=volunteer.id, is_active=True).first() if volunteer else None
-    
-    if not volunteer or not assignment:
-        raise HTTPException(status_code=403, detail="You are not authorized to accept this task")
+    if not volunteer:
+        raise HTTPException(status_code=403, detail="No volunteer profile found for this account")
 
-    if need.status not in [NeedStatus.ASSIGNED, NeedStatus.PENDING]:
-        raise HTTPException(status_code=400, detail=f"Cannot accept task in '{need.status}' status")
+    assignment = _get_volunteer_assignment(db, need_id, volunteer.id)
+    if not assignment:
+        raise HTTPException(status_code=403, detail="You are not assigned to this task")
 
-    # Reset streak if skipping (not applicable here — this is acceptance)
-    need.status = NeedStatus.ACCEPTED
+    # ── State machine guard ───────────────────────────────────────────────────
+    if assignment.status == VolunteerTaskStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Task is already completed — cannot accept again")
+
+    # Idempotent: already accepted → return success (handles double-click / retry)
+    if assignment.status == VolunteerTaskStatus.ACCEPTED:
+        return {
+            "message": "Task already accepted",
+            "volunteer_task_status": assignment.status.value,
+            "need_status": need.status.value,
+        }
+
+    if assignment.status != VolunteerTaskStatus.ASSIGNED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot accept task in volunteer status '{assignment.status.value}' (expected: assigned)",
+        )
+
+    assignment.status = VolunteerTaskStatus.ACCEPTED
+    assignment.accepted_at = datetime.now(timezone.utc)
+
+    from services.trail_service import add_trail_entry
+    from models.task_trail import TrailAction
+    add_trail_entry(
+        db, need_id=need_id, action=TrailAction.STATUS_CHANGED,
+        actor_id=current_user.id, actor_role="volunteer", actor_name=volunteer.name,
+        detail={
+            "volunteer_names": [volunteer.name],
+            "old_status": "ASSIGNED",
+            "new_status": "ACCEPTED",
+            "note": "Volunteer accepted the assignment",
+        },
+    )
     db.commit()
-    logger.info("Volunteer %s accepted task %d", volunteer.email, need_id)
-    return {"message": "Task accepted successfully", "status": need.status}
 
+    logger.info("Volunteer %s accepted task %d (assignment id=%d)", volunteer.email, need_id, assignment.id)
+    return {
+        "message": "Task accepted successfully",
+        "volunteer_task_status": assignment.status.value,
+        "need_status": need.status.value,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /{need_id}/start
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/{need_id}/start")
 def start_task(
@@ -115,25 +299,81 @@ def start_task(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Volunteer starts working on an accepted task."""
+    """
+    Volunteer starts working on an accepted task.
+
+    Gate: NeedVolunteerAssignment.status must be ACCEPTED.
+    Transitions:
+      - NeedVolunteerAssignment: ACCEPTED → IN_PROGRESS
+      - NeedNGOAssignment:       ACCEPTED → IN_PROGRESS  (if not already)
+      - Need.status:             → IN_PROGRESS            (if not already)
+    """
     need = db.query(Need).filter(Need.id == need_id).first()
     if not need:
         raise HTTPException(status_code=404, detail="Task not found")
 
     volunteer = db.query(Volunteer).filter(Volunteer.email == current_user.email).first()
-    from models.need_volunteer_assignment import NeedVolunteerAssignment
-    assignment = db.query(NeedVolunteerAssignment).filter_by(need_id=need_id, volunteer_id=volunteer.id, is_active=True).first() if volunteer else None
+    if not volunteer:
+        raise HTTPException(status_code=403, detail="No volunteer profile found for this account")
 
-    if not volunteer or not assignment:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    assignment = _get_volunteer_assignment(db, need_id, volunteer.id)
+    if not assignment:
+        raise HTTPException(status_code=403, detail="You are not assigned to this task")
 
-    if need.status != NeedStatus.ACCEPTED:
-        raise HTTPException(status_code=400, detail="Must accept task before starting")
+    # ── State machine guard ───────────────────────────────────────────────────
+    if assignment.status == VolunteerTaskStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Task is already completed — cannot start again")
+    if assignment.status == VolunteerTaskStatus.IN_PROGRESS:
+        raise HTTPException(status_code=400, detail="Task is already in progress")
+    if assignment.status != VolunteerTaskStatus.ACCEPTED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Must accept the task before starting (current status: '{assignment.status.value}')",
+        )
 
-    need.status = NeedStatus.IN_PROGRESS
+    now = datetime.now(timezone.utc)
+
+    # ── Transition volunteer task ─────────────────────────────────────────────
+    assignment.status = VolunteerTaskStatus.IN_PROGRESS
+    assignment.started_at = now
+
+    # ── Transition NGO allocation (if accepted) ───────────────────────────────
+    if volunteer.ngo_id:
+        ngo_assign = db.query(NeedNGOAssignment).filter_by(
+            need_id=need_id, ngo_id=volunteer.ngo_id
+        ).first()
+        if ngo_assign and ngo_assign.status == NgoAssignStatus.ACCEPTED:
+            ngo_assign.status = NgoAssignStatus.IN_PROGRESS
+            ngo_assign.started_at = now
+
+    # ── Transition global need status ─────────────────────────────────────────
+    if need.status not in (NeedStatus.IN_PROGRESS, NeedStatus.COMPLETED):
+        need.status = NeedStatus.IN_PROGRESS
+
+    from services.trail_service import add_trail_entry
+    from models.task_trail import TrailAction
+    add_trail_entry(
+        db, need_id=need_id, action=TrailAction.STATUS_CHANGED,
+        actor_id=current_user.id, actor_role="volunteer", actor_name=volunteer.name,
+        detail={
+            "volunteer_names": [volunteer.name],
+            "old_status": "ACCEPTED",
+            "new_status": "IN_PROGRESS",
+            "note": "Volunteer started working on the task",
+        },
+    )
     db.commit()
-    return {"message": "Task marked as in progress", "status": need.status}
+    logger.info("Volunteer %s started task %d", volunteer.email, need_id)
+    return {
+        "message": "Task marked as in progress",
+        "volunteer_task_status": assignment.status.value,
+        "need_status": need.status.value,
+    }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /{need_id}/complete
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/{need_id}/complete")
 def complete_task(
@@ -144,121 +384,153 @@ def complete_task(
     current_user=Depends(get_current_user),
 ):
     """
-    Volunteer completes a task and optionally leaves feedback.
+    Volunteer completes a task.
 
-    Multi-NGO consensus:
-    - Marks this NGO's NeedNGOAssignment as is_completed=True.
-    - Need becomes COMPLETED only when ALL accepted NGO assignments are completed.
-    - If no NGO assignments exist (legacy/single-NGO), completes immediately.
-    - Restores volunteer availability in all paths.
-    - Triggers gamification in background.
+    Gate: NeedVolunteerAssignment.status must be IN_PROGRESS.
+    Completion lock: Raises 400 if status is already COMPLETED.
+
+    Transitions:
+      1. NeedVolunteerAssignment: IN_PROGRESS → COMPLETED
+      2. Check if ALL volunteers in this NGO's allocation are COMPLETED
+         → If yes: NeedNGOAssignment: IN_PROGRESS → COMPLETED
+      3. Check if ALL non-rejected NGO allocations are COMPLETED
+         → If yes: Need.status → COMPLETED  (global completion)
+
+    Gamification and trail entries fire only on global completion.
     """
-    from datetime import datetime, timezone
-    from models.need_ngo_assignment import NeedNGOAssignment, NgoAssignStatus
-    from models.need_volunteer_assignment import NeedVolunteerAssignment
-
     need = db.query(Need).filter(Need.id == need_id).first()
     if not need:
         raise HTTPException(status_code=404, detail="Task not found")
 
     volunteer = db.query(Volunteer).filter(Volunteer.email == current_user.email).first()
-    
-    # Authorization: Volunteer must have an active assignment (direct or pool)
+    if not volunteer:
+        raise HTTPException(status_code=403, detail="No volunteer profile found for this account")
+
+    # ── Authorization: must have an active direct or pool assignment ──────────
     from models.pool_request import PoolAssignment, VolunteerPoolRequest
-    
+
     direct_assignment = db.query(NeedVolunteerAssignment).filter_by(
         need_id=need_id, volunteer_id=volunteer.id, is_active=True
     ).first()
-    
+
     pool_assignment = None
-    pool_req_ids = db.query(VolunteerPoolRequest.id).filter_by(need_id=need_id).all()
-    if pool_req_ids:
-        pool_assignment = db.query(PoolAssignment).filter(
-            PoolAssignment.pool_request_id.in_([r.id for r in pool_req_ids]),
-            PoolAssignment.volunteer_id == volunteer.id,
-            PoolAssignment.status == "approved",
-            PoolAssignment.is_active == True
-        ).first()
+    if not direct_assignment:
+        pool_req_ids = [
+            r.id for r in db.query(VolunteerPoolRequest.id).filter_by(need_id=need_id).all()
+        ]
+        if pool_req_ids:
+            pool_assignment = db.query(PoolAssignment).filter(
+                PoolAssignment.pool_request_id.in_(pool_req_ids),
+                PoolAssignment.volunteer_id == volunteer.id,
+                PoolAssignment.status == "approved",
+                PoolAssignment.is_active == True,
+            ).first()
 
-    if not (direct_assignment or pool_assignment):
-        raise HTTPException(status_code=403, detail="You are not authorized to complete this task (no active assignment found)")
-
-    if need.status not in [NeedStatus.ACCEPTED, NeedStatus.IN_PROGRESS, NeedStatus.ASSIGNED]:
+    active_assignment = direct_assignment  # prefer direct for state machine ops
+    if not active_assignment and not pool_assignment:
         raise HTTPException(
-            status_code=400, detail="Cannot complete task that isn't in an active state"
+            status_code=403,
+            detail="You are not authorized to complete this task (no active assignment found)",
         )
 
     now = datetime.now(timezone.utc)
 
-    # ── Step 1: Mark the appropriate NGO assignment as completed ────────────
-    ngo_to_credit_id = None
+    # ── Completion lock + state machine guard (direct assignment) ─────────────
     if direct_assignment:
-        ngo_to_credit_id = volunteer.ngo_id
-    elif pool_assignment:
-        # For pooled volunteers, we credit the borrowing NGO
-        pool_req = db.query(VolunteerPoolRequest).filter_by(id=pool_assignment.pool_request_id).first()
+        if direct_assignment.status == VolunteerTaskStatus.COMPLETED:
+            raise HTTPException(
+                status_code=400,
+                detail="Task is already completed — cannot complete again",
+            )
+        if direct_assignment.status not in (
+            VolunteerTaskStatus.IN_PROGRESS, VolunteerTaskStatus.ACCEPTED
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot complete task with volunteer status '{direct_assignment.status.value}'. "
+                    "Must be in_progress (or accepted) first."
+                ),
+            )
+
+        # Transition volunteer task → COMPLETED
+        direct_assignment.status = VolunteerTaskStatus.COMPLETED
+        direct_assignment.completed_at = now
+
+    # ── Restore volunteer availability ────────────────────────────────────────
+    volunteer.availability = True
+
+    # ── Determine which NGO to credit ────────────────────────────────────────
+    ngo_to_credit_id = volunteer.ngo_id
+    if pool_assignment and not direct_assignment:
+        pool_req = db.query(VolunteerPoolRequest).filter_by(
+            id=pool_assignment.pool_request_id
+        ).first()
         if pool_req:
             ngo_to_credit_id = pool_req.requesting_ngo_id
 
+    # ── Step 2: Check if all volunteers in this NGO's allocation are done ─────
+    ngo_fully_done = False
     if ngo_to_credit_id:
-        ngo_assignment = (
-            db.query(NeedNGOAssignment)
-            .filter_by(need_id=need_id, ngo_id=ngo_to_credit_id, status=NgoAssignStatus.ACCEPTED)
-            .first()
-        )
-        if ngo_assignment and not ngo_assignment.is_completed:
-            ngo_assignment.is_completed = True
-            ngo_assignment.completed_at = now
-            ngo_assignment.completed_by_volunteer_id = volunteer.id
-            logger.info("NGO %d marked as completed for need %d by volunteer %s", ngo_to_credit_id, need_id, volunteer.email)
+        ngo_assign = db.query(NeedNGOAssignment).filter_by(
+            need_id=need_id, ngo_id=ngo_to_credit_id
+        ).first()
+        if ngo_assign and ngo_assign.status not in (
+            NgoAssignStatus.COMPLETED, NgoAssignStatus.REJECTED
+        ):
+            # Check all volunteers assigned by this NGO
+            ngo_vol_assignments = db.query(NeedVolunteerAssignment).filter_by(
+                need_id=need_id, ngo_id=ngo_to_credit_id, is_active=True
+            ).all()
+            all_vol_done = all(
+                va.status == VolunteerTaskStatus.COMPLETED for va in ngo_vol_assignments
+            ) if ngo_vol_assignments else True
 
-    # ── Step 2: Restore volunteer availability ───────────────────────────────
-    # The volunteer is free to take new tasks as soon as they finish their part.
-    volunteer.availability = True
+            if all_vol_done:
+                ngo_assign.status = NgoAssignStatus.COMPLETED
+                ngo_assign.completed_at = now
+                ngo_assign.completed_by_volunteer_id = volunteer.id
+                ngo_fully_done = True
+                logger.info(
+                    "NGO %d allocation for need %d COMPLETED by volunteer %s",
+                    ngo_to_credit_id, need_id, volunteer.email,
+                )
 
-    # ── Step 3: Check if ALL assigned NGO missions are complete ──────────────
-    # We must check every NGO that was assigned and DID NOT REJECT.
-    # If an NGO is still PENDING or ACCEPTED but not done, the task stays active.
-    all_ngo_assignments = (
-        db.query(NeedNGOAssignment)
-        .filter(NeedNGOAssignment.need_id == need_id, NeedNGOAssignment.status != NgoAssignStatus.REJECTED)
-        .all()
-    )
-
-    all_done = (
-        not all_ngo_assignments  # legacy/no multi-NGO → complete immediately
-        or all(a.is_completed and a.status == NgoAssignStatus.ACCEPTED for a in all_ngo_assignments)
-    )
+    # ── Step 3: Check global completion ──────────────────────────────────────
+    all_done = _check_all_ngo_done(db, need_id)
 
     if all_done:
         need.status = NeedStatus.COMPLETED
         need.feedback_rating = payload.feedback_rating
         need.feedback_comments = payload.feedback_comments
-        
-        # Mark all involved volunteers as available again and deactivate assignments
-        db.query(NeedVolunteerAssignment).filter_by(need_id=need_id).update({"is_active": False})
-        v_ids = [a.volunteer_id for a in db.query(NeedVolunteerAssignment).filter_by(need_id=need_id).all()]
-        for v_id in v_ids:
-            v = db.query(Volunteer).filter_by(id=v_id).first()
-            if v: v.availability = True
 
-        # Release Pool Volunteers
-        from models.pool_request import VolunteerPoolRequest, PoolAssignment
+        # We deliberately DO NOT set NeedVolunteerAssignment.is_active = False 
+        # so that the completed task remains visible on the volunteer's dashboard!
+
+        # Release pool volunteers
         pool_reqs = db.query(VolunteerPoolRequest).filter_by(need_id=need_id).all()
         for pr in pool_reqs:
-            pas = db.query(PoolAssignment).filter_by(pool_request_id=pr.id, is_active=True).all()
-            for pa in pas:
+            active_pas = db.query(PoolAssignment).filter_by(
+                pool_request_id=pr.id, is_active=True
+            ).all()
+            for pa in active_pas:
                 pa.is_active = False
                 v = db.query(Volunteer).filter_by(id=pa.volunteer_id).first()
                 if v:
-                    v.availability = True # Mark available for home NGO again
-        
+                    v.availability = True
+
         logger.info(
-            "Need %d FULLY COMPLETED — all assigned NGOs have finished. Triggered by volunteer %s.",
+            "Need %d FULLY COMPLETED — all NGO allocations done. Triggered by volunteer %s.",
             need_id, volunteer.email,
         )
     else:
-        pending_ngos = [a.ngo_id for a in all_ngo_assignments if not a.is_completed]
+        pending_ngos = [
+            a.ngo_id for a in db.query(NeedNGOAssignment).filter(
+                NeedNGOAssignment.need_id == need_id,
+                NeedNGOAssignment.status != NgoAssignStatus.REJECTED,
+                NeedNGOAssignment.status != NgoAssignStatus.COMPLETED,
+            ).all()
+        ]
         logger.info(
             "Volunteer %s completed their part for need %d. NGOs still pending: %s",
             volunteer.email, need_id, pending_ngos,
@@ -266,7 +538,7 @@ def complete_task(
 
     db.commit()
 
-    # ── Gamification & Trails ────────────────────────────────────────────────
+    # ── Gamification & Trails ─────────────────────────────────────────────────
     from services.trail_service import add_trail_entry
     from models.task_trail import TrailAction
     from services.gamification_service import award_points_to_team
@@ -275,30 +547,33 @@ def complete_task(
         db, need_id=need_id, action=TrailAction.COMPLETED,
         actor_id=current_user.id, actor_role="volunteer", actor_name=volunteer.name,
         detail={
-            "volunteer_id": volunteer.id, 
-            "volunteer_name": volunteer.name,
+            "volunteer_id": volunteer.id,
+            "volunteer_names": [volunteer.name],
             "feedback_rating": payload.feedback_rating,
-            "fully_completed": all_done
+            "fully_completed": all_done,
+            "ngo_fully_done": ngo_fully_done,
         },
     )
 
     if all_done:
-        background_tasks.add_task(
-            award_points_to_team,
-            need_id,
-            payload.feedback_rating,
-        )
-
-    if all_done:
-        return {"message": "Task fully completed — all NGOs finished!", "status": need.status}
+        background_tasks.add_task(award_points_to_team, need_id, payload.feedback_rating)
+        return {
+            "message": "Task fully completed — all NGOs finished!",
+            "status": need.status.value,
+            "all_completed": True,
+        }
     else:
-        pending_count = sum(1 for a in all_ngo_assignments if not a.is_completed)
+        pending_count = sum(
+            1 for a in db.query(NeedNGOAssignment).filter(
+                NeedNGOAssignment.need_id == need_id,
+                NeedNGOAssignment.status != NgoAssignStatus.REJECTED,
+                NeedNGOAssignment.status != NgoAssignStatus.COMPLETED,
+            ).all()
+        )
         return {
             "message": f"Your part is done! Waiting for {pending_count} other NGO(s) to complete.",
-            "status": need.status,
+            "status": need.status.value,
             "all_completed": False,
             "ngo_completion_pending": pending_count,
+            "volunteer_task_status": "completed",
         }
-
-
-

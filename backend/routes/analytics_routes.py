@@ -14,6 +14,7 @@ from models.user import User, UserRole
 from models.ngo import NGO, NgoStatus
 from models.need import Need, NeedStatus
 from models.volunteer import Volunteer
+from models.need_ngo_assignment import NeedNGOAssignment
 from dependencies.auth_dependency import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ def _need_stats(db: Session, ngo_id: Optional[int] = None) -> dict:
     """Compute need lifecycle counts, optionally scoped to an NGO."""
     q = db.query(Need)
     if ngo_id:
-        q = q.filter(Need.ngo_id == ngo_id)
+        q = q.filter(Need.ngo_assignments.any(NeedNGOAssignment.ngo_id == ngo_id))
 
     total = q.count()
     pending = q.filter(Need.status == NeedStatus.PENDING).count()
@@ -36,7 +37,7 @@ def _need_stats(db: Session, ngo_id: Optional[int] = None) -> dict:
     # Re-query for ungrouped
     base = db.query(Need)
     if ngo_id:
-        base = base.filter(Need.ngo_id == ngo_id)
+        base = base.filter(Need.ngo_assignments.any(NeedNGOAssignment.ngo_id == ngo_id))
 
     category_rows = base.with_entities(Need.category, func.count(Need.id)).group_by(Need.category).all()
     urgency_rows = base.with_entities(Need.urgency, func.count(Need.id)).group_by(Need.urgency).all()
@@ -214,7 +215,7 @@ def needs_funnel(
 
     base = db.query(Need)
     if scope_ngo_id:
-        base = base.filter(Need.ngo_id == scope_ngo_id)
+        base = base.filter(Need.ngo_assignments.any(NeedNGOAssignment.ngo_id == scope_ngo_id))
 
     total = base.count()
     assigned = base.filter(Need.status.in_([

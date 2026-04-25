@@ -5,12 +5,19 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
-import { Plus, Search, Check, X, Package, ArrowUpCircle, ChevronDown } from 'lucide-react';
+import { Plus, Search, Check, X, Package, ArrowUpCircle } from 'lucide-react';
 
 const ROLE = () => localStorage.getItem('role');
-const RTColors = { food:'#10b981', water:'#3b82f6', medical:'#ef4444', shelter:'#f59e0b', equipment:'#8b5cf6', transport:'#06b6d4', clothing:'#ec4899', money:'#84cc16', others:'#64748b' };
-const badge = (color, text) => (
-  <span style={{ padding:'0.2rem 0.6rem', borderRadius:'999px', background:color+'18', color, fontSize:'0.72rem', fontWeight:700 }}>{text}</span>
+
+const RTColors = { 
+  food: 'emerald', water: 'blue', medical: 'red', shelter: 'amber', 
+  equipment: 'purple', transport: 'cyan', clothing: 'pink', money: 'lime', others: 'slate' 
+};
+
+const badge = (colorName, text) => (
+  <span className={`px-2.5 py-1 rounded-full bg-${colorName}-100 text-${colorName}-600 text-xs font-bold uppercase tracking-wider`}>
+    {text}
+  </span>
 );
 
 export default function ResourceInventory() {
@@ -22,6 +29,7 @@ export default function ResourceInventory() {
   const [myRequests, setMyRequests]       = useState([]);
   const [myContribs, setMyContribs]       = useState([]);
   const [assignedNeeds, setAssignedNeeds] = useState([]); // for task linkage
+  const [ngoNames, setNgoNames]           = useState({});  // id → name map for admin
   const [tab, setTab]                     = useState(isAdmin ? 'inventory' : 'requests');
   const [loading, setLoading]             = useState(true);
   const [search, setSearch]               = useState('');
@@ -45,20 +53,24 @@ export default function ResourceInventory() {
     setLoading(true);
     try {
       if (isAdmin) {
-        const [inv, ctb, reqs] = await Promise.all([
+        const [inv, ctb, reqs, ngos] = await Promise.all([
           api.get('/api/resource'),
           api.get('/api/resource/contributions?status=pending'),
           api.get('/api/resource/requests').catch(() => ({ data:[] })),
+          api.get('/api/ngo/names').catch(() => ({ data:[] })),
         ]);
         setInventory(inv.data);
         setContributions(ctb.data);
-        setMyRequests(reqs.data); // Reuse myRequests state for admin list
+        setMyRequests(reqs.data);
+        const nameMap = {};
+        (ngos.data || []).forEach(n => { nameMap[n.id] = n.name; });
+        setNgoNames(nameMap);
       } else {
         const [inv, reqs, ctbs, needs] = await Promise.all([
           api.get('/api/resource').catch(() => ({ data:[] })),
           api.get('/api/resource/my-requests').catch(() => ({ data:[] })),
           api.get('/api/resource/my-contributions').catch(() => ({ data:[] })),
-          api.get('/api/ngo/needs/assigned').catch(() => ({ data:[] })),
+          api.get('/api/task/ngo/tasks').catch(() => ({ data:[] })),
         ]);
         setInventory(inv.data);
         setMyRequests(reqs.data);
@@ -71,7 +83,7 @@ export default function ResourceInventory() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Admin: add inventory ────────────────────────────────────────
+  // ── Handlers ───────────────────────────────────────────────────
   const handleAdd = async e => {
     e.preventDefault(); setSaving(true);
     try {
@@ -82,7 +94,6 @@ export default function ResourceInventory() {
     setSaving(false);
   };
 
-  // ── Admin: approve/reject resource request ────────────────────
   const handleRequestAction = async (id, action, inventoryId = null, quantity = null) => {
     try {
       if (action === 'approve') {
@@ -96,37 +107,25 @@ export default function ResourceInventory() {
           admin_notes: 'Automatically approved via inventory match'
         });
       } else {
-        await api.post(`/api/resource/request/${id}/reject`, {
-          admin_notes: 'Rejected by Admin'
-        });
+        await api.post(`/api/resource/request/${id}/reject`, { admin_notes: 'Rejected by Admin' });
       }
       load();
     } catch(err) { 
       const detail = err.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
-      } else {
-        alert(detail || 'Operation failed');
-      }
+      alert(Array.isArray(detail) ? "Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n') : (detail || 'Operation failed'));
     }
   };
 
-  // ── Admin: approve/reject contribution ─────────────────────────
   const handleContribAction = async (id, action) => {
     try {
       await api.post(`/api/resource/contributions/${id}/${action}`, { admin_notes: null });
       load();
     } catch(err) { 
       const detail = err.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
-      } else {
-        alert(detail || 'Operation failed');
-      }
+      alert(Array.isArray(detail) ? "Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n') : (detail || 'Operation failed'));
     }
   };
 
-  // ── NGO: submit request ─────────────────────────────────────────
   const handleRequest = async e => {
     e.preventDefault(); setSaving(true);
     try {
@@ -153,16 +152,11 @@ export default function ResourceInventory() {
       load();
     } catch(err) { 
       const detail = err.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
-      } else {
-        alert(detail || 'Operation failed');
-      }
+      alert(Array.isArray(detail) ? "Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n') : (detail || 'Operation failed'));
     }
     setSaving(false);
   };
 
-  // ── NGO: contribute ─────────────────────────────────────────────
   const handleContribute = async e => {
     e.preventDefault(); setSaving(true);
     try {
@@ -171,11 +165,7 @@ export default function ResourceInventory() {
       load();
     } catch(err) { 
       const detail = err.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        alert("Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n'));
-      } else {
-        alert(detail || 'Operation failed');
-      }
+      alert(Array.isArray(detail) ? "Validation Error:\n" + detail.map(d => `- ${d.loc.slice(1).join(' ')}: ${d.msg}`).join('\n') : (detail || 'Operation failed'));
     }
     setSaving(false);
   };
@@ -190,126 +180,139 @@ export default function ResourceInventory() {
   const TABS = isAdmin ? TABS_ADMIN : TABS_NGO;
 
   return (
-    <div style={{ color:'#1e293b', fontFamily:'Inter, sans-serif' }}>
+    <div className="font-sans text-slate-900 animate-fade-in-up">
       {/* Header */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem', flexWrap:'wrap', gap:'1rem' }}>
+      <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
         <div>
-          <h1 style={{ fontWeight:800, fontSize:'1.6rem', color:'#0f172a', marginBottom:'0.2rem' }}>📦 Resource Inventory</h1>
-          <p style={{ color:'#64748b', fontSize:'0.875rem' }}>{isAdmin ? `${inventory.length} items · ${contributions.length} pending contributions` : 'Global inventory & your NGO resource requests'}</p>
+          <h1 className="font-extrabold text-3xl text-slate-900 mb-1">📦 Resource Inventory</h1>
+          <p className="text-slate-500 text-sm">{isAdmin ? `${inventory.length} items · ${contributions.length} pending contributions` : 'Global inventory & your NGO resource requests'}</p>
         </div>
-        <div style={{ display:'flex', gap:'0.5rem' }}>
+        <div className="flex gap-2">
           {isAdmin && (
-            <button onClick={() => setAddModal(true)} style={primaryBtn('#10b981')}>
-              <Plus size={15} /> Add Item
+            <button onClick={() => setAddModal(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold text-sm transition-all shadow-sm">
+              <Plus size={16} /> Add Item
             </button>
           )}
           {!isAdmin && (
             <>
-              <button onClick={() => setReqModal(true)} style={primaryBtn('#3b82f6')}><Package size={15} /> Request Resource</button>
-              <button onClick={() => setCtbModal(true)} style={primaryBtn('#8b5cf6')}><ArrowUpCircle size={15} /> Contribute</button>
+              <button onClick={() => setReqModal(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-bold text-sm transition-all shadow-sm">
+                <Package size={16} /> Request Resource
+              </button>
+              <button onClick={() => setCtbModal(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg font-bold text-sm transition-all shadow-sm">
+                <ArrowUpCircle size={16} /> Contribute
+              </button>
             </>
           )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display:'flex', gap:'0.5rem', borderBottom:'1px solid #e2e8f0', marginBottom:'1.5rem' }}>
+      <div className="flex gap-2 border-b border-slate-200 mb-6">
         {TABS.map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
-            style={{ padding:'0.6rem 1.1rem', border:'none', borderBottom:`2px solid ${tab===key ? '#6366f1':'transparent'}`, background:'none', color:tab===key ? '#6366f1':'#64748b', fontWeight:600, fontSize:'0.85rem', cursor:'pointer', fontFamily:'inherit', position:'relative', bottom:'-1px' }}>
+            className={`px-4 py-2.5 font-bold text-sm outline-none transition-colors border-b-2 relative -bottom-[1px] ${tab === key ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}>
             {label}
           </button>
         ))}
       </div>
 
-      {loading && <p style={{ color:'#94a3b8', textAlign:'center', padding:'3rem' }}>Loading…</p>}
+      {loading && <p className="text-slate-400 text-center py-12 animate-pulse">Loading…</p>}
 
       {/* ── Inventory tab ── */}
       {!loading && tab === 'inventory' && (
-        <>
-          <div style={{ position:'relative', marginBottom:'1rem', maxWidth:'320px' }}>
-            <Search style={{ position:'absolute', left:'0.75rem', top:'50%', transform:'translateY(-50%)', color:'#94a3b8' }} size={15} />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search inventory…" style={{ paddingLeft:'2.25rem', paddingRight:'1rem', paddingTop:'0.55rem', paddingBottom:'0.55rem', border:'1.5px solid #e2e8f0', borderRadius:'10px', fontFamily:'inherit', fontSize:'0.875rem', outline:'none', width:'100%' }} />
+        <div className="animate-fade-in">
+          <div className="relative mb-6 max-w-[320px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search inventory…" className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors" />
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px,1fr))', gap:'1rem' }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredInv.map(item => {
-              const color = RTColors[item.resource_type] || '#64748b';
+              const colorName = RTColors[item.resource_type] || 'slate';
               const pct = Math.min(100, (item.quantity / (item.initial_quantity || Math.max(item.quantity, 1))) * 100);
               return (
-                <div key={item.id} style={{ background:'#fff', border:'1.5px solid #f1f5f9', borderRadius:'14px', padding:'1.25rem', boxShadow:'0 2px 6px rgba(0,0,0,0.04)' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.75rem' }}>
-                    <span style={{ fontSize:'1.5rem' }}>{{'food':'🍚','water':'💧','medical':'💊','shelter':'🏠','equipment':'🔧','transport':'🚛','clothing':'👗','money':'💰'}[item.resource_type] || '📦'}</span>
-                    {badge(color, item.resource_type)}
+                <div key={item.id} className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex justify-between items-start mb-3">
+                    <span className="text-3xl">{{'food':'🍚','water':'💧','medical':'💊','shelter':'🏠','equipment':'🔧','transport':'🚛','clothing':'👗','money':'💰'}[item.resource_type] || '📦'}</span>
+                    {badge(colorName, item.resource_type)}
                   </div>
-                  <div style={{ fontWeight:700, fontSize:'0.95rem', marginBottom:'0.25rem' }}>{item.name}</div>
-                  <div style={{ fontSize:'1.5rem', fontWeight:800, color }}>{item.quantity} <span style={{ fontSize:'0.8rem', color:'#94a3b8', fontWeight:400 }}>{item.unit}</span></div>
-                  <div style={{ marginTop:'0.625rem', height:'6px', borderRadius:'999px', background:'#f1f5f9' }}>
-                    <div style={{ height:'100%', width:`${pct}%`, background:color, borderRadius:'999px', transition:'width 0.5s' }} />
+                  <div className="font-bold text-slate-900 text-[15px] mb-1">{item.name}</div>
+                  <div className={`text-2xl font-extrabold text-${colorName}-500 flex items-baseline gap-1`}>
+                    {item.quantity} <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">{item.unit}</span>
                   </div>
-                  <div style={{ fontSize:'0.7rem', color:'#94a3b8', marginTop:'0.3rem' }}>
+                  <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div className={`h-full bg-${colorName}-500 transition-all duration-500 ease-out`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-2">
                     {item.status === 'depleted' ? '🔴 Depleted' : item.quantity < 10 ? '🟡 Low stock' : '🟢 In stock'}
                   </div>
                 </div>
               );
             })}
-            {filteredInv.length === 0 && <p style={{ color:'#94a3b8', gridColumn:'1/-1', padding:'2rem 0', textAlign:'center' }}>No inventory items found.</p>}
+            {filteredInv.length === 0 && <p className="text-slate-400 col-span-full py-8 text-center font-medium">No inventory items found.</p>}
           </div>
-        </>
+        </div>
       )}
 
       {/* ── Admin & NGO: Requests tab ── */}
       {!loading && tab === 'requests' && (
-        <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
-          {(isAdmin ? myRequests : myRequests).length === 0 && <p style={{ color:'#94a3b8', textAlign:'center', padding:'3rem' }}>No requests found.</p>}
+        <div className="flex flex-col gap-3 animate-fade-in">
+          {(isAdmin ? myRequests : myRequests).length === 0 && <p className="text-slate-400 text-center py-12 font-medium">No requests found.</p>}
           {(isAdmin ? myRequests : myRequests).map(r => (
-            <div key={r.id} style={{ background:'#fff', border:'1.5px solid #f1f5f9', borderRadius:'12px', padding:'1rem 1.25rem', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'0.5rem' }}>
+            <div key={r.id} className="bg-white border border-slate-100 rounded-xl p-4 flex items-center justify-between flex-wrap gap-4 shadow-sm hover:shadow-md transition-shadow">
               <div>
-                <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
-                  <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{r.resource_type} — {r.quantity_requested} {r.unit}</span>
-                  {badge(r.status==='approved' ? '#10b981' : r.status==='rejected' ? '#ef4444' : '#f59e0b', r.status.toUpperCase())}
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="font-bold text-slate-800">{r.resource_type} — {r.quantity_requested} {r.unit}</span>
+                  {badge(r.status === 'approved' ? 'emerald' : r.status === 'rejected' ? 'red' : 'amber', r.status)}
                 </div>
-                {isAdmin && <p style={{ margin:'0.2rem 0 0', fontSize:'0.75rem', color:'#6366f1' }}>from NGO #{r.requesting_ngo_id} {!r.requested_inventory_id && <span style={{color:'#ef4444'}}>(Old Request - No Item Link)</span>}</p>}
-                {r.need_description && <span style={{ fontSize:'0.75rem', color:'#6366f1', fontWeight:500 }}>for: {r.need_description}</span>}
-                <p style={{ margin:'0.2rem 0 0', color:'#64748b', fontSize:'0.78rem' }}>{r.reason}</p>
+                {isAdmin && <p className="text-xs font-semibold text-indigo-500">from {ngoNames[r.requesting_ngo_id] || `NGO #${r.requesting_ngo_id}`} {!r.requested_inventory_id && <span className="text-red-500 ml-1">(Old Request)</span>}</p>}
+                {r.need_description && <span className="text-xs font-semibold text-indigo-500">for: {r.need_description}</span>}
+                <p className="mt-1 text-sm text-slate-500">{r.reason}</p>
               </div>
-              <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+              <div className="flex items-center gap-2">
                 {isAdmin && r.status === 'pending' && (
                   <>
                     <button 
                       onClick={() => handleRequestAction(r.id, 'approve', r.requested_inventory_id, r.quantity_requested)} 
-                      style={{ ...actionBtn('#10b981'), opacity: !r.requested_inventory_id ? 0.5 : 1 }}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg font-bold text-xs hover:bg-emerald-100 transition-colors ${!r.requested_inventory_id ? 'opacity-50 cursor-not-allowed' : ''}`}
                       title={!r.requested_inventory_id ? "Cannot approve old requests without item link" : ""}
                     >
-                      <Check size={13} /> Approve
+                      <Check size={14} /> Approve
                     </button>
-                    <button onClick={() => handleRequestAction(r.id, 'reject')} style={actionBtn('#ef4444')}><X size={13} /> Reject</button>
+                    <button onClick={() => handleRequestAction(r.id, 'reject')} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-bold text-xs hover:bg-red-100 transition-colors">
+                      <X size={14} /> Reject
+                    </button>
                   </>
                 )}
-                {!isAdmin && r.quantity_allocated && <span style={{ fontSize:'0.72rem', color:'#64748b' }}>Allocated: {r.quantity_allocated} {r.unit}</span>}
+                {!isAdmin && r.quantity_allocated && <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md">Allocated: {r.quantity_allocated} {r.unit}</span>}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* ── Admin: Pending Contributions tab ── */}
-      {/* ── NGO: My Contributions tab ── */}
+      {/* ── Contributions tab ── */}
       {!loading && tab === 'contributions' && (
-        <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
-          {(isAdmin ? contributions : myContribs).length === 0 && <p style={{ color:'#94a3b8', textAlign:'center', padding:'3rem' }}>{isAdmin ? 'No pending contributions.' : 'No contributions submitted yet.'}</p>}
+        <div className="flex flex-col gap-3 animate-fade-in">
+          {(isAdmin ? contributions : myContribs).length === 0 && <p className="text-slate-400 text-center py-12 font-medium">{isAdmin ? 'No pending contributions.' : 'No contributions submitted yet.'}</p>}
           {(isAdmin ? contributions : myContribs).map(c => (
-            <div key={c.id} style={{ background:'#fff', border:'1.5px solid #f1f5f9', borderRadius:'12px', padding:'1rem 1.25rem', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'0.5rem' }}>
+            <div key={c.id} className="bg-white border border-slate-100 rounded-xl p-4 flex items-center justify-between flex-wrap gap-4 shadow-sm hover:shadow-md transition-shadow">
               <div>
-                <span style={{ fontWeight:700, fontSize:'0.9rem' }}>{c.name} — {c.quantity} {c.unit}</span>
-                {isAdmin && <span style={{ marginLeft:'0.5rem', fontSize:'0.75rem', color:'#94a3b8' }}>from {c.ngo_name}</span>}
-                {c.notes && <p style={{ margin:'0.2rem 0 0', color:'#64748b', fontSize:'0.78rem' }}>{c.notes}</p>}
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="font-bold text-slate-800">{c.name} — {c.quantity} {c.unit}</span>
+                  {badge(c.status === 'approved' ? 'emerald' : c.status === 'rejected' ? 'red' : 'amber', c.status)}
+                </div>
+                {isAdmin && <span className="text-xs font-semibold text-slate-400">from {c.ngo_name}</span>}
+                {c.notes && <p className="mt-1 text-sm text-slate-500">{c.notes}</p>}
               </div>
-              <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
-                {badge(c.status==='approved' ? '#10b981' : c.status==='rejected' ? '#ef4444' : '#f59e0b', c.status.toUpperCase())}
+              <div className="flex items-center gap-2">
                 {isAdmin && c.status === 'pending' && (
                   <>
-                    <button onClick={() => handleContribAction(c.id, 'approve')} style={{ ...actionBtn('#10b981') }}><Check size={13} /> Approve</button>
-                    <button onClick={() => handleContribAction(c.id, 'reject')}  style={{ ...actionBtn('#ef4444') }}><X size={13} /> Reject</button>
+                    <button onClick={() => handleContribAction(c.id, 'approve')} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg font-bold text-xs hover:bg-emerald-100 transition-colors">
+                      <Check size={14} /> Approve
+                    </button>
+                    <button onClick={() => handleContribAction(c.id, 'reject')} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-bold text-xs hover:bg-red-100 transition-colors">
+                      <X size={14} /> Reject
+                    </button>
                   </>
                 )}
               </div>
@@ -318,53 +321,45 @@ export default function ResourceInventory() {
         </div>
       )}
 
-      {/* ── Admin: Add Item modal ── */}
+      {/* ── Modals ── */}
       {addModal && (
-        <div style={overlay} onClick={() => setAddModal(false)}>
-          <div style={modalCard} onClick={e => e.stopPropagation()}>
-            <h3 style={mHead}>Add Inventory Item</h3>
-            <form onSubmit={handleAdd} style={{ display:'flex', flexDirection:'column', gap:'0.875rem' }}>
-              {fld('Name', 'text', addForm.name, v => setAddForm({...addForm, name:v}), 'e.g. Rice Bags', true)}
+        <div className="fixed inset-0 bg-slate-900/40 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in" onClick={() => setAddModal(false)}>
+          <div className="bg-white rounded-3xl p-8 w-full max-w-[440px] shadow-2xl animate-fade-in-up" onClick={e => e.stopPropagation()}>
+            <h3 className="font-extrabold text-xl text-slate-900 mb-6 mt-0">Add Inventory Item</h3>
+            <form onSubmit={handleAdd} className="flex flex-col gap-4">
+              <Fld label="Name" type="text" value={addForm.name} onChange={v => setAddForm({...addForm, name:v})} placeholder="e.g. Rice Bags" required={true} />
               <div>
-                <label style={lbl}>Type</label>
-                <select value={addForm.resource_type} onChange={e => setAddForm({...addForm, resource_type:e.target.value})} style={sel}>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Type</label>
+                <select value={addForm.resource_type} onChange={e => setAddForm({...addForm, resource_type:e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-sm font-semibold outline-none focus:border-emerald-500 focus:bg-white transition-all cursor-pointer">
                   {Object.keys(RTColors).map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              {fld('Quantity', 'number', addForm.quantity, v => setAddForm({...addForm, quantity:v}), '0', true)}
-              {fld('Unit', 'text', addForm.unit, v => setAddForm({...addForm, unit:v}), 'units')}
-              <div style={{ display:'flex', gap:'0.5rem', justifyContent:'flex-end', marginTop:'0.5rem' }}>
-                <button type="button" onClick={()=>setAddModal(false)} style={cancelB}>Cancel</button>
-                <button type="submit" disabled={saving} style={submitB('#10b981')}>{saving?'Saving…':'Add Item'}</button>
+              <Fld label="Quantity" type="number" value={addForm.quantity} onChange={v => setAddForm({...addForm, quantity:v})} placeholder="0" required={true} />
+              <Fld label="Unit" type="text" value={addForm.unit} onChange={v => setAddForm({...addForm, unit:v})} placeholder="units" required={false} />
+              <div className="flex gap-2 justify-end mt-4">
+                <button type="button" onClick={()=>setAddModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl font-bold text-sm transition-colors">Cancel</button>
+                <button type="submit" disabled={saving} className="px-5 py-2.5 bg-emerald-500 text-white hover:bg-emerald-600 rounded-xl font-bold text-sm transition-colors shadow-sm">{saving?'Saving…':'Add Item'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ── NGO: Request modal ── */}
       {reqModal && (
-        <div style={overlay} onClick={() => setReqModal(false)}>
-          <div style={modalCard} onClick={e => e.stopPropagation()}>
-            <h3 style={mHead}>Request Resource from Admin</h3>
-            <form onSubmit={handleRequest} style={{ display:'flex', flexDirection:'column', gap:'0.875rem' }}>
+        <div className="fixed inset-0 bg-slate-900/40 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in" onClick={() => setReqModal(false)}>
+          <div className="bg-white rounded-3xl p-8 w-full max-w-[480px] shadow-2xl animate-fade-in-up" onClick={e => e.stopPropagation()}>
+            <h3 className="font-extrabold text-xl text-slate-900 mb-6 mt-0">Request Resource from Admin</h3>
+            <form onSubmit={handleRequest} className="flex flex-col gap-4">
               <div>
-                <label style={lbl}>Select Item from Inventory *</label>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Select Item from Inventory *</label>
                 <select 
                   value={reqForm.resource_inventory_id} 
                   onChange={e => {
                     const item = inventory.find(i => String(i.id) === e.target.value);
-                    if (item) {
-                      setReqForm({
-                        ...reqForm, 
-                        resource_inventory_id: e.target.value,
-                        resource_type: item.resource_type,
-                        unit: item.unit
-                      });
-                    }
+                    if (item) setReqForm({ ...reqForm, resource_inventory_id: e.target.value, resource_type: item.resource_type, unit: item.unit });
                   }} 
-                  style={sel} 
                   required
+                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all cursor-pointer"
                 >
                   <option value="">— Select an item —</option>
                   {inventory.filter(i => i.quantity > 0).map(i => (
@@ -372,58 +367,57 @@ export default function ResourceInventory() {
                   ))}
                 </select>
               </div>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <div style={{ flex: 2 }}>
-                  {fld('Quantity *', 'number', reqForm.quantity, v => setReqForm({...reqForm, quantity:v}), '0', true)}
+              <div className="flex gap-4">
+                <div className="flex-1 w-full">
+                  <Fld label="Quantity *" type="number" value={reqForm.quantity} onChange={v => setReqForm({...reqForm, quantity:v})} placeholder="0" required={true} />
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={lbl}>Unit</label>
-                  <input value={reqForm.unit} disabled style={{ ...inp, background:'#f8fafc', color:'#64748b' }} />
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Unit</label>
+                  <input value={reqForm.unit} disabled className="w-full px-4 py-3 bg-slate-100 border-2 border-slate-100 rounded-xl text-sm font-semibold text-slate-400 outline-none" />
                 </div>
               </div>
               <div>
-                <label style={lbl}>Urgency</label>
-                <select value={reqForm.urgency} onChange={e => setReqForm({...reqForm, urgency:e.target.value})} style={sel}>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Urgency</label>
+                <select value={reqForm.urgency} onChange={e => setReqForm({...reqForm, urgency:e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all cursor-pointer">
                   {['low','medium','high'].map(u=><option key={u} value={u}>{u}</option>)}
                 </select>
               </div>
-              {fld('Reason *', 'text', reqForm.reason, v => setReqForm({...reqForm, reason:v}), 'Why do you need this?', true)}
+              <Fld label="Reason *" type="text" value={reqForm.reason} onChange={v => setReqForm({...reqForm, reason:v})} placeholder="Why do you need this?" required={true} />
               <div>
-                <label style={lbl}>For Task (optional)</label>
-                <select value={reqForm.need_id} onChange={e => setReqForm({...reqForm, need_id:e.target.value})} style={sel}>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">For Task (optional)</label>
+                <select value={reqForm.need_id} onChange={e => setReqForm({...reqForm, need_id:e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-sm font-semibold outline-none focus:border-blue-500 focus:bg-white transition-all cursor-pointer">
                   <option value="">— No specific task —</option>
                   {assignedNeeds.map(n => <option key={n.id} value={n.id}>#{n.id} · {n.category} ({n.location || 'N/A'})</option>)}
                 </select>
               </div>
-              <div style={{ display:'flex', gap:'0.5rem', justifyContent:'flex-end', marginTop:'0.5rem' }}>
-                <button type="button" onClick={()=>setReqModal(false)} style={cancelB}>Cancel</button>
-                <button type="submit" disabled={saving} style={submitB('#3b82f6')}>{saving?'Submitting…':'Submit Request'}</button>
+              <div className="flex gap-2 justify-end mt-4">
+                <button type="button" onClick={()=>setReqModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl font-bold text-sm transition-colors">Cancel</button>
+                <button type="submit" disabled={saving} className="px-5 py-2.5 bg-blue-500 text-white hover:bg-blue-600 rounded-xl font-bold text-sm transition-colors shadow-sm">{saving?'Submitting…':'Submit Request'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ── NGO: Contribute modal ── */}
       {ctbModal && (
-        <div style={overlay} onClick={() => setCtbModal(false)}>
-          <div style={modalCard} onClick={e => e.stopPropagation()}>
-            <h3 style={mHead}>Contribute to Global Inventory</h3>
-            <p style={{ fontSize:'0.82rem', color:'#64748b', marginBottom:'1rem' }}>Suggest items to donate. Admin will review and merge into inventory.</p>
-            <form onSubmit={handleContribute} style={{ display:'flex', flexDirection:'column', gap:'0.875rem' }}>
+        <div className="fixed inset-0 bg-slate-900/40 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in" onClick={() => setCtbModal(false)}>
+          <div className="bg-white rounded-3xl p-8 w-full max-w-[440px] shadow-2xl animate-fade-in-up" onClick={e => e.stopPropagation()}>
+            <h3 className="font-extrabold text-xl text-slate-900 mb-2 mt-0">Contribute to Global Inventory</h3>
+            <p className="text-sm text-slate-500 mb-6 font-medium">Suggest items to donate. Admin will review and merge into inventory.</p>
+            <form onSubmit={handleContribute} className="flex flex-col gap-4">
               <div>
-                <label style={lbl}>Type</label>
-                <select value={ctbForm.resource_type} onChange={e => setCtbForm({...ctbForm, resource_type:e.target.value})} style={sel}>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Type</label>
+                <select value={ctbForm.resource_type} onChange={e => setCtbForm({...ctbForm, resource_type:e.target.value})} className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-sm font-semibold outline-none focus:border-purple-500 focus:bg-white transition-all cursor-pointer">
                   {Object.keys(RTColors).map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              {fld('Item Name *', 'text', ctbForm.name, v => setCtbForm({...ctbForm, name:v}), 'Must match existing item name to merge', true)}
-              {fld('Quantity *', 'number', ctbForm.quantity, v => setCtbForm({...ctbForm, quantity:v}), '0', true)}
-              {fld('Unit', 'text', ctbForm.unit, v => setCtbForm({...ctbForm, unit:v}), 'units')}
-              {fld('Notes', 'text', ctbForm.notes, v => setCtbForm({...ctbForm, notes:v}), 'Optional details')}
-              <div style={{ display:'flex', gap:'0.5rem', justifyContent:'flex-end', marginTop:'0.5rem' }}>
-                <button type="button" onClick={()=>setCtbModal(false)} style={cancelB}>Cancel</button>
-                <button type="submit" disabled={saving} style={submitB('#8b5cf6')}>{saving?'Submitting…':'Submit Contribution'}</button>
+              <Fld label="Item Name *" type="text" value={ctbForm.name} onChange={v => setCtbForm({...ctbForm, name:v})} placeholder="Must match existing item name to merge" required={true} />
+              <Fld label="Quantity *" type="number" value={ctbForm.quantity} onChange={v => setCtbForm({...ctbForm, quantity:v})} placeholder="0" required={true} />
+              <Fld label="Unit" type="text" value={ctbForm.unit} onChange={v => setCtbForm({...ctbForm, unit:v})} placeholder="units" required={false} />
+              <Fld label="Notes" type="text" value={ctbForm.notes} onChange={v => setCtbForm({...ctbForm, notes:v})} placeholder="Optional details" required={false} />
+              <div className="flex gap-2 justify-end mt-4">
+                <button type="button" onClick={()=>setCtbModal(false)} className="px-5 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl font-bold text-sm transition-colors">Cancel</button>
+                <button type="submit" disabled={saving} className="px-5 py-2.5 bg-purple-500 text-white hover:bg-purple-600 rounded-xl font-bold text-sm transition-colors shadow-sm">{saving?'Submitting…':'Submit Contribution'}</button>
               </div>
             </form>
           </div>
@@ -433,20 +427,9 @@ export default function ResourceInventory() {
   );
 }
 
-// ── Style helpers ───────────────────────────────────────────────────────────
-const lbl     = { display:'block', fontSize:'0.78rem', fontWeight:600, color:'#475569', marginBottom:'0.35rem' };
-const inp     = { width:'100%', padding:'0.6rem 0.875rem', border:'1.5px solid #e2e8f0', borderRadius:'8px', fontSize:'0.875rem', fontFamily:'inherit', outline:'none', boxSizing:'border-box' };
-const sel     = { width:'100%', padding:'0.6rem 0.875rem', border:'1.5px solid #e2e8f0', borderRadius:'8px', fontSize:'0.875rem', fontFamily:'inherit', outline:'none', boxSizing:'border-box', cursor:'pointer' };
-const overlay = { position:'fixed', inset:0, background:'rgba(15,23,42,0.4)', zIndex:300, display:'flex', alignItems:'center', justifyContent:'center', padding:'1rem', backdropFilter:'blur(4px)' };
-const modalCard = { background:'#fff', borderRadius:'20px', padding:'1.75rem', width:'100%', maxWidth:'440px', boxShadow:'0 20px 60px rgba(0,0,0,0.15)' };
-const mHead   = { fontWeight:800, fontSize:'1.1rem', color:'#0f172a', marginBottom:'1.25rem', marginTop:0 };
-const cancelB = { padding:'0.6rem 1.1rem', border:'1.5px solid #e2e8f0', background:'#fff', borderRadius:'10px', fontWeight:600, fontSize:'0.85rem', cursor:'pointer', fontFamily:'inherit', color:'#64748b' };
-const submitB = color => ({ padding:'0.6rem 1.25rem', border:'none', background:color, borderRadius:'10px', fontWeight:700, fontSize:'0.85rem', cursor:'pointer', fontFamily:'inherit', color:'#fff' });
-const primaryBtn = color => ({ display:'inline-flex', alignItems:'center', gap:'0.4rem', padding:'0.6rem 1.1rem', border:'none', background:color, color:'#fff', borderRadius:'10px', fontWeight:600, fontSize:'0.85rem', cursor:'pointer', fontFamily:'inherit' });
-const actionBtn  = color => ({ display:'inline-flex', alignItems:'center', gap:'0.3rem', padding:'0.3rem 0.65rem', border:'none', background:color+'18', color, borderRadius:'6px', fontWeight:600, fontSize:'0.72rem', cursor:'pointer', fontFamily:'inherit' });
-const fld = (label, type, value, onChange, placeholder, required) => (
+const Fld = ({ label, type, value, onChange, placeholder, required }) => (
   <div>
-    <label style={lbl}>{label}</label>
-    <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} style={inp} />
+    <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">{label}</label>
+    <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required} className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-sm font-semibold outline-none focus:border-indigo-500 focus:bg-white transition-all" />
   </div>
 );

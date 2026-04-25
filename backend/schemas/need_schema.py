@@ -56,6 +56,10 @@ class NeedBase(BaseModel):
     feedback_comments: Optional[str] = None
     my_ngo_completed: Optional[bool] = False
     is_global_pool: Optional[bool] = False
+    # Per-volunteer and per-NGO status (populated by task_routes)
+    volunteer_task_status: Optional[str] = None   # ASSIGNED|ACCEPTED|IN_PROGRESS|COMPLETED
+    ngo_assignment_status: Optional[str] = None   # PENDING|ACCEPTED|IN_PROGRESS|COMPLETED|REJECTED
+    assigned_ngo_ids: Optional[list[int]] = []    # List of currently assigned NGO IDs
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

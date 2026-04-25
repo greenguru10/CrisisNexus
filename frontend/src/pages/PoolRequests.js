@@ -36,7 +36,7 @@ export default function PoolRequests() {
         const [my, lending, needs] = await Promise.all([
           axios.get(`${API}/api/pool/my-requests`, auth()),
           axios.get(`${API}/api/pool/lending-requests`, auth()),
-          axios.get(`${API}/api/ngo/needs/assigned`, auth())
+          axios.get(`${API}/api/task/ngo/tasks`, auth())
         ]);
         setMyRequests(my.data);
         setLendingRequests(lending.data);
@@ -98,10 +98,10 @@ export default function PoolRequests() {
   const list = isAdmin ? requests : myRequests;
 
   return (
-    <div style={{ color:'#f1f5f9', fontFamily:'Inter, sans-serif' }}>
+    <div style={{ color:'#1e293b', fontFamily:'Inter, sans-serif' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'2rem', flexWrap:'wrap', gap:'1rem' }}>
         <div>
-          <h1 style={{ fontSize:'1.75rem', fontWeight:800, marginBottom:'0.25rem' }}>🤝 Volunteer Pool Requests</h1>
+          <h1 style={{ fontSize:'1.75rem', fontWeight:800, marginBottom:'0.25rem', color:'#0f172a' }}>🤝 Volunteer Pool Requests</h1>
           <p style={{ color:'#64748b' }}>{isAdmin ? 'Review and approve cross-NGO volunteer pool requests.' : 'Request volunteers from the global pool to help with your tasks.'}</p>
         </div>
         {!isAdmin && (
@@ -112,7 +112,7 @@ export default function PoolRequests() {
       {msg && <div style={{ padding:'0.875rem', borderRadius:'10px', marginBottom:'1rem', background:msg.toLowerCase().includes('fail')||msg.toLowerCase().includes('error')?'rgba(239,68,68,0.1)':'rgba(16,185,129,0.1)', border:`1px solid ${msg.toLowerCase().includes('fail')||msg.toLowerCase().includes('error')?'#ef4444':'#10b981'}44`, color:msg.toLowerCase().includes('fail')||msg.toLowerCase().includes('error')?'#f87171':'#6ee7b7', fontSize:'0.9rem' }}>{msg}</div>}
 
       {!isAdmin && (
-        <div style={{ display:'flex', gap:'1rem', borderBottom:'1px solid rgba(255,255,255,0.05)', marginBottom:'1.5rem' }}>
+        <div style={{ display:'flex', gap:'1rem', borderBottom:'1px solid #e2e8f0', marginBottom:'1.5rem' }}>
           <TabBtn active={tab==='my'} onClick={()=>setTab('my')}>My Borrow Requests</TabBtn>
           <TabBtn active={tab==='lending'} onClick={()=>setTab('lending')}>
             Lending Requests {lendingRequests.length > 0 && <span style={dot}>{lendingRequests.length}</span>}
@@ -124,7 +124,7 @@ export default function PoolRequests() {
 
       <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
         {tab === 'lending' && lendingRequests.map(a => (
-          <div key={a.assignment_id} style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', padding:'1.5rem' }}>
+          <div key={a.assignment_id} style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:'16px', padding:'1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <div>
                    <p style={{ margin:0, fontWeight:700 }}>{a.volunteer_name} <span style={{color:'#64748b', fontWeight:400}}>requested by</span> {a.borrower_name}</p>
@@ -140,13 +140,13 @@ export default function PoolRequests() {
         ))}
 
         {tab !== 'lending' && (isAdmin ? requests : myRequests).length === 0 && (
-          <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', padding:'3rem', textAlign:'center', color:'#475569' }}>
+          <div style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:'16px', padding:'3rem', textAlign:'center', color:'#64748b' }}>
             {isAdmin ? 'No pool requests to review.' : 'No pool requests submitted yet.'}
           </div>
         )}
         
         {tab !== 'lending' && (isAdmin ? requests : myRequests).map(r => (
-          <div key={r.id} style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', padding:'1.5rem' }}>
+          <div key={r.id} style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:'16px', padding:'1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:'0.75rem' }}>
               <div style={{ flex:1 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:'0.75rem', marginBottom:'0.5rem', flexWrap:'wrap' }}>
@@ -223,7 +223,7 @@ export default function PoolRequests() {
               (Found {allVolunteers.length} total, {filtered.length} borrowable)
             </span>
           </p>
-          <div style={{ maxHeight:'250px', overflowY:'auto', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'8px', padding:'0.5rem', marginBottom:'1rem' }}>
+          <div style={{ maxHeight:'250px', overflowY:'auto', border:'1px solid #e2e8f0', borderRadius:'8px', padding:'0.5rem', marginBottom:'1rem' }}>
             {filtered.length === 0 && <p style={{textAlign:'center', padding:'1rem', color:'#64748b'}}>No available volunteers found in other NGOs.</p>}
             {filtered.map(v => (
               <label key={v.id} style={{ display:'flex', alignItems:'center', gap:'0.75rem', padding:'0.6rem', borderRadius:'6px', cursor:'pointer', background:selectedVolIds.includes(v.id)?'rgba(16,185,129,0.1)':'transparent' }}>
@@ -255,8 +255,8 @@ export default function PoolRequests() {
   );
 }
 
-const inS = { width:'100%', padding:'0.6rem 0.875rem', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#f1f5f9', fontSize:'0.9rem', boxSizing:'border-box', outline:'none' };
-function Stat({ label, value }) { return <div><span style={{ color:'#64748b', fontSize:'0.75rem' }}>{label}: </span><span style={{ fontWeight:600, fontSize:'0.875rem', color:'#f1f5f9' }}>{value}</span></div>; }
+const inS = { width:'100%', padding:'0.6rem 0.875rem', borderRadius:'8px', border:'1px solid #cbd5e1', background:'#f8fafc', color:'#0f172a', fontSize:'0.9rem', boxSizing:'border-box', outline:'none' };
+function Stat({ label, value }) { return <div><span style={{ color:'#64748b', fontSize:'0.75rem' }}>{label}: </span><span style={{ fontWeight:600, fontSize:'0.875rem', color:'#0f172a' }}>{value}</span></div>; }
 function FRow({ label, children }) { return <div><label style={{ display:'block', fontSize:'0.8rem', color:'#94a3b8', marginBottom:'0.4rem', fontWeight:500 }}>{label}</label>{children}</div>; }
 function TabBtn({ children, active, onClick }) { 
   return <button onClick={onClick} style={{ padding:'0.75rem 1.25rem', border:'none', background:'none', color:active?'#a855f7':'#64748b', cursor:'pointer', fontWeight:600, borderBottom:active?'2px solid #a855f7':'none', position:'relative' }}>{children}</button>; 
@@ -266,8 +266,8 @@ const actionBtn = (c) => ({ padding:'0.4rem 0.875rem', borderRadius:'6px', borde
 
 function Modal({ children, onClose, title }) {
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.6)', backdropFilter:'blur(6px)' }} onClick={e => e.target===e.currentTarget && onClose()}>
-      <div style={{ background:'#1e1b4b', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'16px', padding:'2rem', width:'460px', maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(15,23,42,0.6)', backdropFilter:'blur(4px)' }} onClick={e => e.target===e.currentTarget && onClose()}>
+      <div style={{ background:'#ffffff', border:'1px solid #e2e8f0', borderRadius:'16px', padding:'2rem', width:'460px', maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem' }}>
           <h3 style={{ fontWeight:700, margin:0 }}>{title}</h3>
           <button onClick={onClose} style={{ background:'none', border:'none', color:'#64748b', cursor:'pointer', fontSize:'1.2rem' }}>✕</button>

@@ -68,7 +68,7 @@ const VolunteerTasks = () => {
           {tasks.map(task => (
             <div key={task.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 flex flex-col justify-between hover:shadow-md transition-all">
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
+                <div className="flex justify-between items-start mb-5">
                   <div className="flex flex-col gap-1">
                     <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold uppercase tracking-wider w-fit">
                       {task.category}
@@ -80,14 +80,22 @@ const VolunteerTasks = () => {
                     )}
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
-                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide ${
-                      task.status === 'completed' ? 'bg-green-100 text-green-700' :
-                      task.status === 'in_progress' ? 'bg-purple-100 text-purple-700 animate-pulse' :
-                      task.status === 'accepted' ? 'bg-indigo-100 text-indigo-700' :
-                      'bg-amber-100 text-amber-700'
-                    }`}>
-                      {task.status.replace('_', ' ')}
-                    </span>
+                    {/* Show the per-volunteer status (not the global Need.status) */}
+                    {(() => {
+                      const volStatus = task.volunteer_task_status || task.status;
+                      const statusColors = {
+                        completed:   'bg-green-100 text-green-700',
+                        in_progress: 'bg-purple-100 text-purple-700 animate-pulse',
+                        accepted:    'bg-indigo-100 text-indigo-700',
+                        assigned:    'bg-amber-100 text-amber-700',
+                        pending:     'bg-amber-100 text-amber-700',
+                      };
+                      return (
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide ${statusColors[volStatus] || 'bg-gray-100 text-gray-500'}`}>
+                          {(volStatus || 'unknown').replace('_', ' ')}
+                        </span>
+                      );
+                    })()}
                     {task.status === 'completed' && (
                       <span className="text-xs font-black text-amber-600 flex items-center gap-0.5" title="Points earned for this task">
                         ⭐ {task.is_global_pool ? '+11' : '+10'} pts
@@ -105,29 +113,53 @@ const VolunteerTasks = () => {
                 </div>
               </div>
 
-              {/* ACTION BUTTONS */}
+              {/* ACTION BUTTONS — driven by per-volunteer status, NOT global Need.status */}
               <div className="pt-4 border-t border-gray-100">
-                {task.status === 'assigned' || task.status === 'pending' ? (
-                  <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'accept')} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-blue-700 disabled:opacity-50 transition-all">
-                    <CheckCircle size={18} /> {processing === task.id ? 'Processing...' : 'Accept Assignment'}
-                  </button>
-                ) : task.status === 'accepted' ? (
-                  <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'start')} className="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-indigo-700 disabled:opacity-50 transition-all">
-                    <Play size={18} /> {processing === task.id ? 'Processing...' : 'Make In-Progress'}
-                  </button>
-                ) : (task.status === 'in_progress' || task.status === 'accepted') && task.my_ngo_completed ? (
-                  <div className="w-full py-2.5 bg-blue-50 text-blue-500 rounded-lg font-bold flex justify-center items-center gap-2 border border-blue-100">
-                    <CheckCircle2 size={18} /> Waiting for other NGOs
-                  </div>
-                ) : task.status === 'in_progress' ? (
-                  <button disabled={processing === task.id} onClick={() => setCompletingTask(task.id)} className="w-full py-2.5 bg-green-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-green-700 disabled:opacity-50 transition-all">
-                    <CheckCircle2 size={18} /> Complete Task
-                  </button>
-                ) : (
-                  <div className="w-full py-2.5 bg-gray-50 text-gray-400 rounded-lg font-bold flex justify-center items-center gap-2">
-                    <CheckCircle2 size={18} /> Finished
-                  </div>
-                )}
+                {(() => {
+                  // volunteer_task_status is the per-volunteer state machine value:
+                  //   ASSIGNED → ACCEPTED → IN_PROGRESS → COMPLETED
+                  // task.status is the global Need.status (shared across all NGOs — do NOT use for buttons)
+                  const volStatus = task.volunteer_task_status || task.status;
+
+                  if (volStatus === 'assigned' || volStatus === 'pending') {
+                    return (
+                      <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'accept')} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-blue-700 disabled:opacity-50 transition-all">
+                        <CheckCircle size={18} /> {processing === task.id ? 'Processing...' : 'Accept Assignment'}
+                      </button>
+                    );
+                  }
+
+                  if (volStatus === 'accepted') {
+                    return (
+                      <button disabled={processing === task.id} onClick={() => handleAction(task.id, 'start')} className="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-indigo-700 disabled:opacity-50 transition-all">
+                        <Play size={18} /> {processing === task.id ? 'Processing...' : 'Start Working'}
+                      </button>
+                    );
+                  }
+
+                  if (volStatus === 'in_progress' && task.my_ngo_completed) {
+                    return (
+                      <div className="w-full py-2.5 bg-blue-50 text-blue-500 rounded-lg font-bold flex justify-center items-center gap-2 border border-blue-100">
+                        <CheckCircle2 size={18} /> Waiting for other NGOs
+                      </div>
+                    );
+                  }
+
+                  if (volStatus === 'in_progress') {
+                    return (
+                      <button disabled={processing === task.id} onClick={() => setCompletingTask(task.id)} className="w-full py-2.5 bg-green-600 text-white rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-green-700 disabled:opacity-50 transition-all">
+                        <CheckCircle2 size={18} /> Complete Task
+                      </button>
+                    );
+                  }
+
+                  // completed or unknown
+                  return (
+                    <div className="w-full py-2.5 bg-gray-50 text-gray-400 rounded-lg font-bold flex justify-center items-center gap-2">
+                      <CheckCircle2 size={18} /> Finished
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}

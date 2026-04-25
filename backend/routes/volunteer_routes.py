@@ -28,8 +28,15 @@ router = APIRouter(tags=["Volunteers"])
 def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
     """
     Build a VolunteerResponse-compatible dict by merging the volunteer
-    record with its linked User's account_status.
+    record with its linked User's account_status and NGO name.
     """
+    # Resolve NGO name
+    ngo_name = None
+    if volunteer.ngo_id:
+        ngo_obj = db.query(NGO).filter(NGO.id == volunteer.ngo_id).first()
+        if ngo_obj:
+            ngo_name = ngo_obj.name
+
     vol_dict = {
         "id": volunteer.id,
         "name": volunteer.name,
@@ -42,6 +49,7 @@ def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
         "availability": volunteer.availability,
         "rating": volunteer.rating,
         "ngo_id": volunteer.ngo_id,
+        "ngo_name": ngo_name,                    # ← joined from NGO table
         "tasks_completed": volunteer.tasks_completed,
         "created_at": volunteer.created_at,
         "updated_at": volunteer.updated_at,
@@ -146,7 +154,7 @@ def list_pending_volunteers(
 ):
     """
     List pending volunteers.
-    - Admin: all pending volunteers system-wide.
+    - Admin: ALL pending volunteers system-wide (regardless of ngo_id).
     - NGO Coordinator: only pending volunteers for their own NGO.
     """
     query = (
@@ -159,11 +167,33 @@ def list_pending_volunteers(
         ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
         scope_id = ngo.id if ngo else -1
         query = query.filter(Volunteer.ngo_id == scope_id)
-    elif current_user.role == UserRole.ADMIN:
-        # Admin only sees volunteers who are NOT assigned to any NGO
-        query = query.filter(Volunteer.ngo_id == None)
+    # Admin: no ngo_id filter — see ALL pending volunteers system-wide
 
     pending_volunteers = query.order_by(Volunteer.created_at.desc()).all()
+    return [_enrich_volunteer_response(v, db) for v in pending_volunteers]
+
+
+# ── Admin-only: explicit /admin/pending-volunteers endpoint ────────
+
+@router.get("/admin/pending-volunteers", response_model=List[VolunteerResponse])
+def admin_list_pending_volunteers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """
+    [ADMIN ONLY] GET /api/admin/pending-volunteers
+    Returns ALL pending volunteers system-wide with NGO name attached.
+    Admin can subsequently approve or reject each via the existing
+    POST /api/volunteer/{id}/approve and POST /api/volunteer/{id}/reject endpoints.
+    """
+    pending_volunteers = (
+        db.query(Volunteer)
+        .join(User, func.lower(User.email) == func.lower(Volunteer.email))
+        .filter(User.role == UserRole.VOLUNTEER)
+        .filter(User.account_status == AccountStatus.PENDING)
+        .order_by(Volunteer.created_at.desc())
+        .all()
+    )
     return [_enrich_volunteer_response(v, db) for v in pending_volunteers]
 
 

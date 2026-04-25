@@ -78,7 +78,9 @@ class VolunteerBase(BaseModel):
     availability: bool
     rating: Optional[float] = None
     ngo_id: Optional[int] = None
+    ngo_name: Optional[str] = None          # Joined from NGO table for display
     account_status: Optional[str] = None
+    tasks_completed: Optional[int] = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

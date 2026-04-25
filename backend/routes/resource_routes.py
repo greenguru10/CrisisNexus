@@ -65,14 +65,16 @@ def list_resources(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-
-    """[ADMIN] List all resources with optional filters."""
+    """List all resources with optional filters.
+    Returns title (alias for name) and availability (derived from status) for frontend.
+    """
     query = db.query(ResourceInventory)
     if resource_type:
         query = query.filter(ResourceInventory.resource_type == resource_type)
     if status_filter:
         query = query.filter(ResourceInventory.status == status_filter)
-    return query.order_by(ResourceInventory.resource_type).all()
+    resources = query.order_by(ResourceInventory.resource_type).all()
+    return resources
 
 
 @router.put("/{resource_id}", response_model=ResourceResponse)

@@ -82,38 +82,38 @@ def _cache_set(key: str, value: dict) -> None:
 _VALID_DEFAULT = {"status": "VALID", "confidence": 50, "reason": "Validation skipped (fail-open)"}
 
 
-# ── Synchronous Groq call (runs inside executor) ─────────────────
+import os
+import google.generativeai as genai
+from config import settings
 
-def _sync_validate_call(client, text: str) -> dict:
+# ── Gemini Async Call ───────────────────────────────────────────────
+
+async def _gemini_validate_call(text: str) -> dict:
     """
-    Blocking Groq API call for report classification.
+    Async Gemini API call for report classification.
     Returns a dict with status / confidence / reason.
     """
     try:
+        api_key = settings.GEMINI_API_KEY
+        if not api_key or api_key == 'your_gemini_api_key_here':
+            logger.warning("GEMINI_API_KEY not set – validation skipped (fail-open)")
+            return _VALID_DEFAULT
+
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash",
+            system_instruction=VALIDATION_PROMPT,
+            generation_config={"response_mime_type": "application/json", "temperature": 0}
+        )
+
         # Only send a reasonable amount of text for classification
         truncated = text[:3000] if len(text) > 3000 else text
 
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": VALIDATION_PROMPT},
-                {"role": "user", "content": truncated},
-            ],
-            temperature=0,
-            max_tokens=150,
-        )
-
-        raw = response.choices[0].message.content.strip()
+        response = await model.generate_content_async(truncated)
+        raw = response.text.strip()
         logger.debug("Validation raw response: %s", raw[:200])
 
-        # Clean markdown fences if present
-        cleaned = raw
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`").strip()
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:].strip()
-
-        parsed = json.loads(cleaned)
+        parsed = json.loads(raw)
 
         # Normalise status to uppercase
         status = str(parsed.get("status", "VALID")).upper().strip()
@@ -137,7 +137,7 @@ def _sync_validate_call(client, text: str) -> dict:
         return _VALID_DEFAULT
 
     except Exception as e:
-        logger.error("Validation Groq call error: %s", e)
+        logger.error("Validation Gemini call error: %s", e)
         return _VALID_DEFAULT
 
 
@@ -170,20 +170,10 @@ async def validate_report(text: str, timeout: float = 8.0) -> dict:
         logger.debug("Validation cache hit for key=%s", key[:12])
         return cached
 
-    # ── Get shared Groq client ──
-    from services.llm_service import _get_groq_client
-
-    client = _get_groq_client()
-    if client is None:
-        logger.warning("Groq client unavailable – validation skipped (fail-open)")
-        return _VALID_DEFAULT
-
     # ── Run LLM classification ──
     try:
         result = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(
-                None, _sync_validate_call, client, text
-            ),
+            _gemini_validate_call(text),
             timeout=timeout,
         )
     except asyncio.TimeoutError:

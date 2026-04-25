@@ -44,9 +44,12 @@ Every task tracks its own history. Using the **Audit Trail Panel**, you can see:
 ### 🗺️ Geospatial Intelligence & Heatmap
 A fully integrated, interactive map powered by OpenStreetMap and React-Leaflet. It auto-clusters crisis markers to prevent UI clutter and features a dynamic density Heatmap layer that visually highlights high-priority disaster zones based on urgency and affected population.
 
-### 📄 Hybrid OCR & Pre-Validation Engine
+### 📄 Hybrid OCR & Gemini Pre-Validation Engine
 - **Image Preprocessing**: Automatically handles and parses uploaded images and scanned PDFs of handwritten reports via an EasyOCR-powered pipeline.
-- **Smart Validation Gate**: A pre-pipeline LLM layer ensures that only authentic disaster reports are processed, drastically reducing database spam.
+- **Smart Validation Gate**: A high-speed, fully asynchronous pre-pipeline LLM layer powered by **Google Gemini (gemini-2.5-flash)** in JSON mode ensures that only authentic, actionable disaster reports are processed, drastically reducing database spam.
+
+### 🎨 Modern & Responsive UI
+The entire frontend is built on a robust design system utilizing **pure Tailwind CSS utility classes**. Legacy inline styles have been entirely stripped out, ensuring a visually unified, performant, and easily maintainable codebase across all pages—from the Admin mapping view to the mobile-responsive Volunteer dashboard.
 
 ### 📦 Automated Inventory Merging
 When an NGO contributes resources, the system automatically checks for existing entries. If you contribute "Rice" and "Rice" already exists, the quantities are merged, maintaining a clean and efficient warehouse view.
@@ -54,7 +57,7 @@ When an NGO contributes resources, the system automatically checks for existing 
 ### 🏆 Gamification & Incentives
 - **Performance Points**: Earned by volunteers for every task.
 - **The Pool Bonus**: Volunteers who assist "borrowing" NGOs receive **extra points**, incentivizing cross-organization help.
-- **Streaks**: Consecutive task completions increase rank on the global leaderboard.
+- **Persistent Histories**: The Volunteer dashboard reliably stores and displays both active and completed task histories, showing cumulative impact.
 
 ---
 
@@ -73,7 +76,7 @@ When an NGO contributes resources, the system automatically checks for existing 
 *   **Resource Contribution**: Push local resources to the global Admin pool to support wider relief efforts.
 
 ### 👤 Volunteer Domain (Field Operations)
-*   **My Tasks**: A simplified, mobile-friendly view of current assignments.
+*   **My Tasks**: A simplified, mobile-friendly view of current assignments, featuring both active and previously completed tasks.
 *   **Progress Tracker**: Move tasks through "Accept" → "Start" → "Complete" with real-time feedback.
 *   **Achievement Board**: View personal stats, points, and leaderboard position to track impact.
 
@@ -134,7 +137,7 @@ The backend handles AI processing, API routing, and database interactions.
    # Download the required NLP model for SpaCy
    python -m spacy download en_core_web_sm
    ```
-   *(Note: OpenCV and EasyOCR will automatically install from requirements.txt for the image processing pipeline.)*
+   *(Note: OpenCV, EasyOCR, and google-generativeai will automatically install from requirements.txt for the pipeline.)*
 
 3. **Configure Environment Variables (`.env`)**:
    In the `backend` directory, create a file named `.env` and add the following:
@@ -147,7 +150,8 @@ The backend handles AI processing, API routing, and database interactions.
    JWT_SECRET=any_random_secure_string_here
    
    # Third-Party APIs
-   GROQ_API_KEY=your_groq_api_key_here          # Required for LLM text extraction/validation
+   GROQ_API_KEY=your_groq_api_key_here          # Required for LLM text extraction logic
+   GEMINI_API_KEY=your_gemini_api_key_here      # Required for Gemini 2.5 Flash validation layer
    OPENCAGE_API_KEY=your_opencage_api_key_here  # Required for Map/Location Geocoding
    ```
 
@@ -197,7 +201,7 @@ Follow these steps in **two separate terminal windows**:
 cd backend
 # Ensure virtual environment is active (venv)
 # Start the FastAPI server with auto-reload for development
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload
 ```
 *Comment: The backend handles all data logic, authentication, and the audit trail engine.*
 
@@ -215,6 +219,7 @@ npm start
 
 - **`backend/models/`**: Defines the data structure (Users, Tasks, Resources, Trails).
 - **`backend/routes/`**: Handles API requests (e.g., `task_routes.py` manages the consensus completion).
+- **`backend/services/`**: Houses the NLP, location extraction, and validation logic.
 - **`backend/scripts/`**: Maintenance and setup utilities.
 - **`frontend/src/pages/`**: The distinct views for Admin, NGO, and Volunteers.
 - **`frontend/src/components/`**: Reusable UI elements like the **TaskTrailPanel**.
@@ -226,6 +231,7 @@ npm start
 - **"Relation X does not exist"**: You missed Step 2. Run `python scripts/setup_db.py`.
 - **"Connection Refused"**: Ensure your Backend is running on port 8000.
 - **"Invalid Token"**: Clear your browser cookies or log in again; your JWT session might have expired.
+- **"Validation Layer Skipping"**: Ensure `GEMINI_API_KEY` is set correctly in the `.env` file. Without it, the system falls back to allowing all reports (fail-open).
 
 ---
 **Built with ❤️ for Crisis Nexus — Empowering communities through federated coordination.**

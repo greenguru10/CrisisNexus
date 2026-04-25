@@ -145,10 +145,10 @@ const Volunteers = () => {
     (v.skills || []).some(s => s.toLowerCase().includes(filter.toLowerCase()))
   );
 
-  // Admin approved tab: group volunteers by ngo_id
+  // Admin approved tab: group volunteers by NGO name
   const groupedByNgo = isAdmin && activeTab === 'approved'
     ? filtered.reduce((acc, v) => {
-        const key = v.ngo_id ? `NGO #${v.ngo_id}` : 'Unassigned';
+        const key = v.ngo_name || (v.ngo_id ? `NGO #${v.ngo_id}` : 'Unassigned');
         if (!acc[key]) acc[key] = [];
         acc[key].push(v);
         return acc;
@@ -388,9 +388,17 @@ function VolCard({ vol, activeTab, isAdmin, isNgo, approvingId, rejectingId, han
                   </span>
                 )
               ) : (
-                <span className="flex items-center gap-1 text-xs text-amber-500">
-                  <Clock size={12} /> Awaiting review
-                </span>
+                <>
+                  <span className="flex items-center gap-1 text-xs text-amber-500">
+                    <Clock size={12} /> Awaiting review
+                  </span>
+                  {/* Show NGO name on pending cards so Admin knows which NGO this volunteer is for */}
+                  {vol.ngo_name && (
+                    <span className="ml-1 text-xs font-semibold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                      🏢 {vol.ngo_name}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           </div>
