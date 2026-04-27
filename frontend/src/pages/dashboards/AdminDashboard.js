@@ -87,101 +87,84 @@ const AdminDashboard = () => {
   };
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900">System Overview</h1>
-        <p className="text-gray-500">Real-time engagement and operational readiness</p>
+    <div className="space-y-8 animate-fade-in-up">
+      <header className="mb-10">
+        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-2">System Overview</h1>
+        <p className="text-slate-500 font-medium">Real-time engagement and operational readiness across all NGOs</p>
       </header>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, i) => (
-          <div key={i} className={`p-6 bg-white rounded-xl shadow-sm border ${stat.border} hover:shadow-md transition-shadow`}>
-            <div className={`w-12 h-12 ${stat.bg} ${stat.color} rounded-lg flex items-center justify-center mb-4`}>
-              <stat.icon size={24} />
+          <div key={i} className={`p-6 bg-white rounded-2xl shadow-sm border ${stat.border} hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden group`}>
+            <div className={`absolute top-0 right-0 w-32 h-32 ${stat.bg} rounded-full blur-3xl -mr-16 -mt-16 opacity-50 group-hover:opacity-80 transition-opacity`}></div>
+            <div className="relative z-10">
+              <div className={`w-14 h-14 ${stat.bg} ${stat.color} rounded-2xl flex items-center justify-center mb-6 shadow-sm`}>
+                <stat.icon size={26} strokeWidth={2.5} />
+              </div>
+              <p className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">{stat.label}</p>
+              <p className="text-4xl font-black text-slate-900 tracking-tight">{stat.value}</p>
+              {stat.sub && <p className="text-sm font-medium text-slate-400 mt-2">{stat.sub}</p>}
             </div>
-            <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">{stat.label}</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">{stat.value}</p>
-            {stat.sub && <p className="text-xs text-gray-400 mt-1">{stat.sub}</p>}
           </div>
         ))}
       </div>
 
       {/* Status Overview */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2.5 h-2.5 bg-gray-400 rounded-full"></div>
-            <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Pending</span>
+        {[
+          { label: 'Pending', count: data.pending_needs, color: 'bg-slate-400', ring: 'ring-slate-100' },
+          { label: 'Assigned', count: data.assigned_needs, color: 'bg-amber-400', ring: 'ring-amber-100' },
+          { label: 'Accepted', count: data.accepted_needs, color: 'bg-blue-500', ring: 'ring-blue-100' },
+          { label: 'In Progress', count: data.in_progress_needs, color: 'bg-purple-500', ring: 'ring-purple-100', pulse: true },
+          { label: 'Completed', count: data.completed_needs, color: 'bg-emerald-500', ring: 'ring-emerald-100' }
+        ].map((s, i) => (
+          <div key={i} className="p-5 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-center gap-3 mb-3">
+              <div className={`w-3 h-3 ${s.color} rounded-full ring-4 ${s.ring} ${s.pulse ? 'animate-pulse' : ''}`}></div>
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">{s.label}</span>
+            </div>
+            <p className="text-3xl font-extrabold text-slate-900">{s.count || 0}</p>
           </div>
-          <p className="text-2xl font-bold text-gray-900">{data.pending_needs || 0}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2.5 h-2.5 bg-amber-400 rounded-full"></div>
-            <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Assigned</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{data.assigned_needs || 0}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2.5 h-2.5 bg-blue-500 rounded-full"></div>
-            <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Accepted</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{data.accepted_needs || 0}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2.5 h-2.5 bg-purple-500 rounded-full animate-pulse"></div>
-            <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">In Progress</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{data.in_progress_needs || 0}</p>
-        </div>
-        <div className="p-4 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2.5 h-2.5 bg-green-500 rounded-full"></div>
-            <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Completed</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{data.completed_needs || 0}</p>
-        </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Category Breakdown */}
-        <div className="p-6 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">Category Breakdown</h2>
-          <div className="space-y-3">
+        <div className="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm">
+          <h2 className="text-xl font-bold text-slate-900 mb-6">Category Breakdown</h2>
+          <div className="space-y-4">
             {Object.entries(data.category_breakdown || {}).map(([cat, count]) => (
-              <div key={cat} className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${categoryColors[cat] || 'bg-gray-400'}`}></div>
-                <span className="text-sm text-gray-600 capitalize flex-1">{cat}</span>
-                <div className="flex-1 bg-gray-100 rounded-full h-2">
+              <div key={cat} className="flex items-center gap-4">
+                <div className={`w-3.5 h-3.5 rounded-full ${categoryColors[cat] || 'bg-slate-400'} shadow-sm`}></div>
+                <span className="text-sm font-semibold text-slate-700 capitalize w-24">{cat}</span>
+                <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
                   <div
-                    className={`h-2 rounded-full ${categoryColors[cat] || 'bg-gray-400'}`}
+                    className={`h-full rounded-full ${categoryColors[cat] || 'bg-slate-400'} transition-all duration-1000`}
                     style={{ width: `${Math.min(100, (count / data.total_needs) * 100)}%` }}
                   ></div>
                 </div>
-                <span className="text-sm font-semibold text-gray-700 w-8 text-right">{count}</span>
+                <span className="text-sm font-black text-slate-900 w-10 text-right">{count}</span>
               </div>
             ))}
           </div>
         </div>
 
         {/* Urgency Breakdown */}
-        <div className="p-6 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">Urgency Distribution</h2>
-          <div className="space-y-4">
+        <div className="p-8 bg-white rounded-3xl border border-slate-100 shadow-sm">
+          <h2 className="text-xl font-bold text-slate-900 mb-6">Urgency Distribution</h2>
+          <div className="space-y-5">
             {Object.entries(data.urgency_breakdown || {}).map(([urgency, count]) => (
-              <div key={urgency} className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${urgencyColors[urgency] || 'bg-gray-400'}`}></div>
-                <span className="text-sm text-gray-600 capitalize flex-1">{urgency}</span>
-                <div className="flex-1 bg-gray-100 rounded-full h-2">
+              <div key={urgency} className="flex items-center gap-4">
+                <div className={`w-3.5 h-3.5 rounded-full ${urgencyColors[urgency] || 'bg-slate-400'} shadow-sm`}></div>
+                <span className="text-sm font-semibold text-slate-700 capitalize w-20">{urgency}</span>
+                <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
                   <div
-                    className={`h-2 rounded-full ${urgencyColors[urgency] || 'bg-gray-400'}`}
+                    className={`h-full rounded-full ${urgencyColors[urgency] || 'bg-slate-400'} transition-all duration-1000`}
                     style={{ width: `${Math.min(100, (count / data.total_needs) * 100)}%` }}
                   ></div>
                 </div>
-                <span className="text-sm font-semibold text-gray-700 w-8 text-right">{count}</span>
+                <span className="text-sm font-black text-slate-900 w-10 text-right">{count}</span>
               </div>
             ))}
           </div>

@@ -2,7 +2,7 @@
 Volunteer model – represents a volunteer who can be matched to needs.
 """
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
 from database import Base
@@ -23,6 +23,14 @@ class Volunteer(Base):
     longitude = Column(Float, nullable=True)
     availability = Column(Boolean, nullable=False, default=True, index=True)
     rating = Column(Float, nullable=True, default=0.0, comment="Volunteer performance rating 0-5")
+    # ── Multi-NGO federation fields ───────────────────────────────
+    ngo_id = Column(Integer, ForeignKey("ngos.id", ondelete="SET NULL"), nullable=True, index=True,
+                    comment="Primary NGO this volunteer belongs to")
+    # ── Gamification fields ───────────────────────────────────────
+    tasks_completed = Column(Integer, nullable=False, default=0, comment="Total completed task count")
+    consecutive_completions = Column(Integer, nullable=False, default=0,
+                                     comment="Current streak count for badge tracking")
+    points = Column(Integer, nullable=False, default=0, comment="Total gamification points earned")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

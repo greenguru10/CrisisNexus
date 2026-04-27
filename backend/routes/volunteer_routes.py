@@ -1,20 +1,23 @@
 """
 Volunteer routes – Add, list, update, and delete volunteers.
-Includes admin-only endpoints for update, delete, and approval workflow.
+Updated: NGO coordinators can approve/reject their own NGO's volunteers,
+add volunteers directly to their NGO, and view only their NGO's pool.
 """
 
 import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import User, UserRole, AccountStatus
 from models.volunteer import Volunteer
+from models.ngo import NGO, NgoStatus
 from schemas.volunteer_schema import (
     VolunteerCreate, VolunteerUpdate, VolunteerResponse, AdminVolunteerCreate,
 )
-from dependencies.auth_dependency import get_current_user, get_current_admin
+from dependencies.auth_dependency import get_current_user, get_current_admin, get_current_admin_or_ngo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Volunteers"])
@@ -25,8 +28,15 @@ router = APIRouter(tags=["Volunteers"])
 def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
     """
     Build a VolunteerResponse-compatible dict by merging the volunteer
-    record with its linked User's account_status.
+    record with its linked User's account_status and NGO name.
     """
+    # Resolve NGO name
+    ngo_name = None
+    if volunteer.ngo_id:
+        ngo_obj = db.query(NGO).filter(NGO.id == volunteer.ngo_id).first()
+        if ngo_obj:
+            ngo_name = ngo_obj.name
+
     vol_dict = {
         "id": volunteer.id,
         "name": volunteer.name,
@@ -38,6 +48,9 @@ def _enrich_volunteer_response(volunteer: Volunteer, db: Session) -> dict:
         "longitude": volunteer.longitude,
         "availability": volunteer.availability,
         "rating": volunteer.rating,
+        "ngo_id": volunteer.ngo_id,
+        "ngo_name": ngo_name,                    # ← joined from NGO table
+        "tasks_completed": volunteer.tasks_completed,
         "created_at": volunteer.created_at,
         "updated_at": volunteer.updated_at,
         "account_status": None,
@@ -93,23 +106,33 @@ def add_volunteer(
 
 @router.get("/volunteers", response_model=List[VolunteerResponse])
 def list_volunteers(
-    available: Optional[bool] = Query(None, description="Filter by availability"),
-    skill: Optional[str] = Query(None, description="Filter by skill (partial match)"),
+    available: Optional[bool] = Query(None),
+    skill: Optional[str] = Query(None),
+    ngo_id: Optional[int] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    List all **approved** volunteers with optional filters.
-    Only returns volunteers whose linked User account has account_status = 'approved'.
+    List approved volunteers.
+    - Admin: all approved volunteers; can filter by ngo_id.
+    - NGO Coordinator: only their own NGO's volunteers.
     """
-    # Join Volunteer with User on email, filter by approved status
     query = (
         db.query(Volunteer)
-        .join(User, User.email == Volunteer.email)
+        .join(User, func.lower(User.email) == func.lower(Volunteer.email))
         .filter(User.role == UserRole.VOLUNTEER)
         .filter(User.account_status == AccountStatus.APPROVED)
     )
+
+    # Scope to NGO
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        scope_id = ngo.id if ngo else -1
+        query = query.filter(Volunteer.ngo_id == scope_id)
+    elif ngo_id is not None:
+        query = query.filter(Volunteer.ngo_id == ngo_id)
 
     if available is not None:
         query = query.filter(Volunteer.availability == available)
@@ -127,21 +150,52 @@ def list_volunteers(
 @router.get("/volunteers/pending", response_model=List[VolunteerResponse])
 def list_pending_volunteers(
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_or_ngo),
+):
+    """
+    List pending volunteers.
+    - Admin: ALL pending volunteers system-wide (regardless of ngo_id).
+    - NGO Coordinator: only pending volunteers for their own NGO.
+    """
+    query = (
+        db.query(Volunteer)
+        .join(User, func.lower(User.email) == func.lower(Volunteer.email))
+        .filter(User.role == UserRole.VOLUNTEER)
+        .filter(User.account_status == AccountStatus.PENDING)
+    )
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        scope_id = ngo.id if ngo else -1
+        query = query.filter(Volunteer.ngo_id == scope_id)
+    # Admin: no ngo_id filter — see ALL pending volunteers system-wide
+
+    pending_volunteers = query.order_by(Volunteer.created_at.desc()).all()
+    return [_enrich_volunteer_response(v, db) for v in pending_volunteers]
+
+
+# ── Admin-only: explicit /admin/pending-volunteers endpoint ────────
+
+@router.get("/admin/pending-volunteers", response_model=List[VolunteerResponse])
+def admin_list_pending_volunteers(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
 ):
     """
-    **[ADMIN ONLY]** List all volunteers with account_status = 'pending'.
-    Used by the admin dashboard to review and approve new signups.
+    [ADMIN ONLY] GET /api/admin/pending-volunteers
+    Returns ALL pending volunteers system-wide with NGO name attached.
+    Admin can subsequently approve or reject each via the existing
+    POST /api/volunteer/{id}/approve and POST /api/volunteer/{id}/reject endpoints.
     """
     pending_volunteers = (
         db.query(Volunteer)
-        .join(User, User.email == Volunteer.email)
+        .join(User, func.lower(User.email) == func.lower(Volunteer.email))
         .filter(User.role == UserRole.VOLUNTEER)
         .filter(User.account_status == AccountStatus.PENDING)
         .order_by(Volunteer.created_at.desc())
         .all()
     )
     return [_enrich_volunteer_response(v, db) for v in pending_volunteers]
+
 
 
 @router.get("/volunteers/{volunteer_id}", response_model=VolunteerResponse)
@@ -158,76 +212,89 @@ def approve_volunteer(
     volunteer_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_ngo),
 ):
     """
-    **[ADMIN ONLY]** Approve a pending volunteer.
-    Sets account_status to 'approved' and triggers two background emails:
-    1. WhatsApp onboarding email (with join instructions)
-    2. Welcome email (confirming active status)
+    Approve a pending volunteer.
+    - Admin: can approve any volunteer.
+    - NGO Coordinator: can only approve volunteers from their own NGO.
     """
     volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
     if not volunteer:
-        raise HTTPException(status_code=404, detail=f"Volunteer with id {volunteer_id} not found")
+        raise HTTPException(status_code=404, detail=f"Volunteer {volunteer_id} not found")
 
-    # Find linked user
+    # NGO coordinator scope check
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo or volunteer.ngo_id != ngo.id:
+            raise HTTPException(status_code=403, detail="Volunteer does not belong to your NGO")
+
     user = db.query(User).filter(User.email == volunteer.email).first()
     if not user:
-        raise HTTPException(status_code=404, detail="No linked user account found for this volunteer")
-
+        raise HTTPException(status_code=404, detail="No linked user account found")
     if user.account_status == AccountStatus.APPROVED:
         raise HTTPException(status_code=400, detail="Volunteer is already approved")
 
-    # Update status
     user.account_status = AccountStatus.APPROVED
     db.commit()
+    logger.info("%s approved volunteer id=%d (%s)", current_user.email, volunteer_id, volunteer.email)
 
-    logger.info("Admin %s approved volunteer id=%d (%s)", current_user.email, volunteer_id, volunteer.email)
-
-    # Send WhatsApp onboarding email
-    from services.email_service import send_onboarding_email
+    from services.email_service import send_onboarding_email, send_volunteer_welcome_email
     background_tasks.add_task(send_onboarding_email, volunteer.name, volunteer.email)
-
-    # Send welcome email
-    from services.email_service import send_volunteer_welcome_email
     background_tasks.add_task(send_volunteer_welcome_email, volunteer.name, volunteer.email)
 
-    return {
-        "message": f"Volunteer {volunteer.name} has been approved",
-        "account_status": "approved",
-    }
+    return {"message": f"Volunteer {volunteer.name} approved", "account_status": "approved"}
 
 
 @router.post("/volunteer/{volunteer_id}/reject")
 def reject_volunteer(
     volunteer_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_ngo),
 ):
     """
-    **[ADMIN ONLY]** Reject a pending volunteer.
-    Sets account_status to 'rejected'.
+    Reject a pending volunteer.
+    - Admin: any volunteer.
+    - NGO Coordinator: only their NGO's volunteers.
     """
     volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
     if not volunteer:
-        raise HTTPException(status_code=404, detail=f"Volunteer with id {volunteer_id} not found")
+        raise HTTPException(status_code=404, detail=f"Volunteer {volunteer_id} not found")
+
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo or volunteer.ngo_id != ngo.id:
+            raise HTTPException(status_code=403, detail="Volunteer does not belong to your NGO")
 
     user = db.query(User).filter(User.email == volunteer.email).first()
     if not user:
-        raise HTTPException(status_code=404, detail="No linked user account found for this volunteer")
-
+        raise HTTPException(status_code=404, detail="No linked user account found")
     if user.account_status == AccountStatus.REJECTED:
-        raise HTTPException(status_code=400, detail="Volunteer is already rejected")
+        raise HTTPException(status_code=400, detail="Already rejected")
 
     user.account_status = AccountStatus.REJECTED
     db.commit()
+    logger.info("%s rejected volunteer id=%d", current_user.email, volunteer_id)
+    return {"message": f"Volunteer {volunteer.name} rejected", "account_status": "rejected"}
 
-    logger.info("Admin %s rejected volunteer id=%d (%s)", current_user.email, volunteer_id, volunteer.email)
 
-    return {
-        "message": f"Volunteer {volunteer.name} has been rejected",
-        "account_status": "rejected",
-    }
+@router.post("/ngo/{ngo_id}/volunteer/{volunteer_id}/remove", status_code=status.HTTP_200_OK)
+def remove_volunteer_from_ngo(
+    ngo_id: int, volunteer_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_or_ngo),
+):
+    """Admin or NGO Coordinator removes a volunteer from the NGO (sets ngo_id = NULL)."""
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo or ngo.id != ngo_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id, Volunteer.ngo_id == ngo_id).first()
+    if not volunteer:
+        raise HTTPException(status_code=404, detail="Volunteer not found in this NGO")
+    volunteer.ngo_id = None
+    db.commit()
+    return {"message": f"Volunteer {volunteer.name} removed from NGO id={ngo_id}"}
 
 
 # ── Admin-Only CRUD Endpoints ───────────────────────────────────
@@ -241,23 +308,31 @@ def admin_create_volunteer(
     payload: AdminVolunteerCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_ngo),
 ):
     """
-    **[ADMIN ONLY]** Create a new volunteer with email and skills.
+    **[ADMIN / NGO]** Create a new volunteer with email and skills.
     Generates a secure password and emails the volunteer.
-    Also sends WhatsApp onboarding instructions.
     Admin-created volunteers are auto-approved (no approval required).
+    NGO coordinators can only create volunteers for their own NGO.
     """
     # 1. Check if email exists
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # 2. Generate random password
+    # 2. Resolve ngo_id: admin uses payload, NGO coordinator auto-sets their own NGO
+    ngo_id_val = payload.ngo_id
+    if current_user.role == UserRole.NGO:
+        ngo = db.query(NGO).filter(NGO.coordinator_user_id == current_user.id).first()
+        if not ngo:
+            raise HTTPException(status_code=403, detail="No NGO associated with your account")
+        ngo_id_val = ngo.id
+
+    # 3. Generate random password
     temp_password = secrets.token_urlsafe(12)
 
-    # 3. Create User — auto-approved since admin is creating
+    # 4. Create User — auto-approved since admin/ngo is creating
     new_user = User(
         email=payload.email,
         password_hash=hash_password(temp_password),
@@ -268,27 +343,28 @@ def admin_create_volunteer(
     db.add(new_user)
     db.flush()
 
-    # 4. Create Volunteer profile linked by email
+    # 5. Create Volunteer profile linked by email
+    volunteer_name = payload.name if payload.name else payload.email.split('@')[0]
     volunteer = Volunteer(
-        name=payload.email.split('@')[0],  # Generic name initially
+        name=volunteer_name,
         email=payload.email,
         mobile_number=payload.mobile_number,
         skills=payload.skills,
         availability=True,
+        ngo_id=ngo_id_val,
     )
     db.add(volunteer)
     db.commit()
     db.refresh(volunteer)
 
-    logger.info("Admin %s created volunteer %s (auto-approved)", current_user.email, volunteer.email)
+    logger.info("%s created volunteer %s (auto-approved, ngo_id=%s)", current_user.email, volunteer.email, ngo_id_val)
 
-    # 5. Send Welcome Email (with temp password)
+    # 6. Send Welcome Email (with temp password)
     background_tasks.add_task(send_admin_created_volunteer_email, volunteer.email, temp_password)
-
-    # 6. Send WhatsApp Onboarding Email (with join instructions)
     background_tasks.add_task(send_onboarding_email, volunteer.name, volunteer.email)
 
     return _enrich_volunteer_response(volunteer, db)
+
 
 @router.put("/volunteer/{volunteer_id}", response_model=VolunteerResponse)
 def update_volunteer(

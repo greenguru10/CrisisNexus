@@ -21,8 +21,8 @@ const Login = () => {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('role', data.role);
-      navigate('/dashboard');
-      window.location.reload();
+      if (data.ngo_id) { localStorage.setItem('ngo_id', data.ngo_id); localStorage.setItem('ngo_name', data.ngo_name || ''); }
+      window.location.href = '/dashboard';
     } catch (err) {
       const status = err.response?.status;
       const detail = err.response?.data?.detail || 'Login failed. Please check your credentials.';
@@ -39,9 +39,9 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-      <div className="max-w-md w-full mx-4">
-        <div className="bg-white rounded-2xl shadow-xl shadow-blue-500/10 p-8 border border-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4">
+      <div className="max-w-md w-full">
+        <div className="bg-white rounded-2xl shadow-xl shadow-blue-500/10 p-6 sm:p-8 border border-gray-100">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <LogIn size={28} />

@@ -44,8 +44,10 @@ class VolunteerCreate(BaseModel):
 class AdminVolunteerCreate(BaseModel):
     """Schema for admin creating a volunteer with just email and skills."""
     email: str = Field(..., description="Volunteer email for login and notifications")
+    name: Optional[str] = Field(None, description="Full name (optional, defaults to email prefix)")
     mobile_number: Optional[str] = Field(None, description="Mobile number for WhatsApp (e.g. +919876543210)")
     skills: List[str] = Field(..., min_length=1)
+    ngo_id: Optional[int] = Field(None, description="NGO ID to assign the volunteer to")
 
 class VolunteerUpdate(BaseModel):
     """Schema for admin to update a volunteer. All fields optional."""
@@ -58,6 +60,7 @@ class VolunteerUpdate(BaseModel):
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     availability: Optional[bool] = None
     rating: Optional[float] = Field(None, ge=0, le=5)
+    ngo_id: Optional[int] = None
 
 
 # ── Response Schemas ─────────────────────────────────────────────
@@ -74,7 +77,10 @@ class VolunteerBase(BaseModel):
     longitude: Optional[float] = None
     availability: bool
     rating: Optional[float] = None
+    ngo_id: Optional[int] = None
+    ngo_name: Optional[str] = None          # Joined from NGO table for display
     account_status: Optional[str] = None
+    tasks_completed: Optional[int] = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
