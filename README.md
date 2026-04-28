@@ -13,7 +13,7 @@
 
   <br/><br/>
 
-  # 🌍 CrisisNexus
+  # 🌍 CommunitySync
 
   ### Multi-NGO Crisis Response Platform with AI-Powered Resource Allocation
 
@@ -26,10 +26,8 @@
 </div>
 <img src="https://user-images.githubusercontent.com/74038190/212284100-561aa473-3905-4a80-b561-0d28506553ee.gif" width="900"> 
 
- 
-## 🚀 What's New in v2.0
 
-### Major Features Added
+## 🚀 Major Features Added
 
 🎯 **Multi-NGO Assignment** — Assign a single crisis need to multiple NGOs simultaneously for parallel collaborative response. Each NGO coordinator can independently accept or reject assignments.
 
@@ -49,7 +47,7 @@
 
 ## 📑 Table of Contents
 
-- [🚀 What's New in v2.0](#-whats-new-in-v20)
+- [🚀 Major Features Added](#-major-features-added)
 - [✨ Features](#-features)
 - [🛠 Tech Stack](#-tech-stack)
 - [🏗 System Architecture](#-system-architecture)
@@ -59,7 +57,6 @@
 - [🔐 Environment Variables](#-environment-variables)
 - [🗺 Usage Flow](#-usage-flow)
 - [🔭 Future Scope & Roadmap](#-future-scope--roadmap)
-- [🤝 Contributing](#-contributing)
 - [📄 License](#-license)
 
 ---
@@ -190,9 +187,9 @@ Each NGO maintains independent status while sharing the same task pool — enabl
 
 ---
 
-## � Enhanced Database Schema
+## Enhanced Database Schema
 
-The v2.0 database includes several new models to support multi-NGO collaboration and gamification:
+The database includes several models to support multi-NGO collaboration and gamification:
 
 ### Core Models
 - **User** — System users with roles (ADMIN, NGO_COORDINATOR, VOLUNTEER)
@@ -200,41 +197,42 @@ The v2.0 database includes several new models to support multi-NGO collaboration
 - **Need** — Crisis reports with extracted NLP fields, priority scores, and status
 - **Volunteer** — Registered responders with skills, location, availability, and performance metrics
 
-### Junction & Relationship Models (NEW)
+### Junction & Relationship Models
 - **NeedNGOAssignment** — Links needs to multiple NGOs with status tracking (PENDING → ACCEPTED → COMPLETED)
 - **NeedVolunteerAssignment** — Links needs to volunteers with active/inactive tracking and performance feedback
 - **Resource** — Emergency supplies and materials with inventory tracking and allocation history
 - **PoolRequest** — Batch requests for resource or volunteer pools with approval workflows
 
-### Gamification & Audit Models (NEW)
+### Gamification & Audit Models
 - **Achievement** — Badge definitions and criteria (e.g., "Completed 5 tasks", "Perfect rating")
 - **UserAchievement** — Tracks earned badges and points per volunteer
 - **TaskTrail** — Immutable audit log of all actions (assignments, acceptances, completions, resource allocations) with timestamps and actor details
 
 ---
 
-## �📸 Screenshots
+## 📸 Screenshots
 
 <div align="center">
 
 | Dashboard | Needs Page |
 |:---------:|:----------:|
-| ![Dashboard](./screenshots/dashboard.png) | ![Needs](./screenshots/needs.png) |
-| <img width="1911" height="969" alt="Screenshot 2026-04-19 171724" src="https://github.com/user-attachments/assets/094aad04-b2a6-42d7-a299-57919f475875" /> | <img width="1905" height="956" alt="Screenshot 2026-04-19 171752" src="https://github.com/user-attachments/assets/0f4ccc0f-8297-41ab-8524-84d6b1b9500b" /> |
+| <img width="1365" height="647" alt="WhatsApp Image 2026-04-28 at 5 54 32 PM" src="https://github.com/user-attachments/assets/887f585d-4608-4ae4-9df3-6084370d689d" /> | <img width="1365" height="647" alt="WhatsApp Image 2026-04-28 at 5 54 33 PM" src="https://github.com/user-attachments/assets/7af95f0e-f68f-4dc1-8e2f-3dee4161455e" />
+ 
 
 | Volunteers Page | Upload Report |
 |:---------------:|:-------------:|
-| ![Volunteers](./screenshots/volunteers.png) | ![Upload](./screenshots/upload.png) |
-| <img width="1918" height="957" alt="Screenshot 2026-04-19 171935" src="https://github.com/user-attachments/assets/33cf6a5a-36dc-48db-b478-29852ebe7ca6" /> | <img width="1643" height="913" alt="Screenshot 2026-04-19 171816" src="https://github.com/user-attachments/assets/fceaa7bd-8fae-4788-a56a-83dc34d98ade" /> |
+| <img width="1365" height="644" alt="WhatsApp Image 2026-04-28 at 5 54 35 PM" src="https://github.com/user-attachments/assets/a8c6bb2a-ef89-452e-99c4-6b1b553725d0" /> | <img width="1365" height="648" alt="WhatsApp Image 2026-04-28 at 5 54 33 PM (1)" src="https://github.com/user-attachments/assets/b1d2a2fb-26db-4a22-823f-3e797f7bd783" />
 
-| Login Page | Profile Settings |
+| HeatMap indicating major needs | Resource Inventory Management |
 |:----------:|:----------------:|
-| ![Login](./screenshots/login.png) | ![Profile](./screenshots/profile.png) |
-| <img width="1918" height="968" alt="Screenshot 2026-04-19 171956" src="https://github.com/user-attachments/assets/de2f64c5-e43c-44bd-821d-3d688fb95a4b" /> | <img width="1916" height="916" alt="Screenshot 2026-04-19 171838" src="https://github.com/user-attachments/assets/519d49f5-91a2-45b1-9694-aff11cf3cd57" /> |
+| <img width="1106" height="639" alt="WhatsApp Image 2026-04-28 at 5 54 34 PM" src="https://github.com/user-attachments/assets/b5d9dedc-43f4-4974-9d46-55bacf24f824" /> | <img width="1365" height="632" alt="WhatsApp Image 2026-04-28 at 5 54 35 PM (1)" src="https://github.com/user-attachments/assets/0c5ddc19-ae1e-4199-8497-ba45f7d60917" />
+
+
+| NGO Management | Profile Settings |
+|:----------:|:----------------:|
+| <img width="1365" height="646" alt="WhatsApp Image 2026-04-28 at 5 54 35 PM (2)" src="https://github.com/user-attachments/assets/94289eac-3f91-4f60-ae93-0ae6599c1642" /> | <img width="1363" height="641" alt="WhatsApp Image 2026-04-28 at 5 54 36 PM" src="https://github.com/user-attachments/assets/2fcdb9d1-7991-4e43-992f-171f32bd61ae" />
 
 </div>
-
-> 📌 *Place your screenshots in a `/screenshots` directory at the project root.*
 
 ---
 
@@ -268,7 +266,7 @@ The v2.0 database includes several new models to support multi-NGO collaboration
 | `POST` | `/api/match/{need_id}/manual` | Manually assign a specific volunteer | Admin |
 | `POST` | `/api/match/{need_id}/unassign` | Remove volunteer from a need | Admin |
 
-### 🏢 NGO Management (NEW)
+### 🏢 NGO Management
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
@@ -282,7 +280,7 @@ The v2.0 database includes several new models to support multi-NGO collaboration
 | `POST` | `/api/needs/{need_id}/ngo-reject` | NGO coordinator rejects pushed task | NGO Coordinator |
 | `GET` | `/api/ngo/needs/assigned` | Get all needs assigned to current NGO | NGO Coordinator |
 
-### 🎮 Gamification (NEW)
+### 🎮 Gamification
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
@@ -290,7 +288,7 @@ The v2.0 database includes several new models to support multi-NGO collaboration
 | `GET` | `/api/volunteer/{id}/stats` | Individual volunteer stats and badges | Authenticated |
 | `GET` | `/api/achievements` | List all available achievement badges | Authenticated |
 
-### 📦 Resource Management (NEW)
+### 📦 Resource Management
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
@@ -300,7 +298,7 @@ The v2.0 database includes several new models to support multi-NGO collaboration
 | `DELETE` | `/api/resources/{id}` | Remove resource from inventory | Admin |
 | `POST` | `/api/resources/{id}/allocate` | Allocate resource to a need/NGO | Admin / NGO |
 
-### 💼 Pool Requests (NEW)
+### 💼 Pool Requests
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
@@ -308,7 +306,7 @@ The v2.0 database includes several new models to support multi-NGO collaboration
 | `POST` | `/api/pools` | Create a new pool request | Admin / NGO |
 | `PUT` | `/api/pools/{id}` | Update pool request status | Admin |
 
-### 📊 Analytics & Reporting (NEW)
+### 📊 Analytics & Reporting 
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
@@ -317,7 +315,7 @@ The v2.0 database includes several new models to support multi-NGO collaboration
 | `GET` | `/api/analytics/ngo-performance` | NGO-specific performance and efficiency metrics | Admin |
 | `GET` | `/api/analytics/volunteer-performance` | Volunteer contribution and reliability stats | Admin |
 
-### 📋 Task Trail & Activity Log (NEW)
+### 📋 Task Trail & Activity Log
 
 | Method | Endpoint | Description | Access |
 |--------|----------|-------------|--------|
@@ -481,7 +479,7 @@ A typical end-to-end user journey through CommunitySync:
 🔄 Admin can Unassign / Reassign / Override at any time
 ```
 
-### Role-Specific Capabilities (v2 - Multi-NGO Support)
+### Role-Specific Capabilities
 
 | Action | Admin | NGO Coordinator | Volunteer |
 |--------|:-----:|:-----:|:---------:|
@@ -503,7 +501,7 @@ A typical end-to-end user journey through CommunitySync:
 
 ## 🔭 Future Scope & Roadmap
 
-### Implemented in v2.0
+### Implemented
 ✅ Multi-NGO parallel assignment  
 ✅ Gamification & leaderboards  
 ✅ Resource inventory management  
@@ -511,7 +509,7 @@ A typical end-to-end user journey through CommunitySync:
 ✅ Dual LLM support (Groq + Gemini)  
 ✅ Pre-pipeline validation gate  
 
-### Planned for v3.0
+### Planned
 
 | Feature | Description | Timeline |
 |---------|-------------|----------|
@@ -587,7 +585,7 @@ GROQ_DEBUG=True
 
 
 
-## � Project Structure
+## Project Structure
 
 ```
 CrisisNexus/
@@ -723,7 +721,7 @@ CrisisNexus/
 
 ---
 
-## �📄 License
+## 📄 License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
